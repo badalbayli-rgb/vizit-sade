@@ -50,6 +50,8 @@ Google Docs seçeneği biçimi koruyan DOCX dosyasını indirir ve Google Drive'
 - Eski DOCX'te olup güncel FONET hasta listesinde olmayan hastalar belgenin en sonunda kırmızı korunur.
 - Eski DOCX'ten eşleşen hastaların sabit alanları kilitli kalır. Yeni hastaların tanısında en son yanıtlanan Genel Cerrahi konsültasyonu, yoksa FONET tanı listesi kullanılır.
 - BH alanına `CA` yalnızca doğrulanmış kanser ifadesi varsa eklenir; "malignite/tümör izlenmedi" ve kalsiyum gibi kullanımlar CA sayılmaz.
+- Aynı tarihteki dört ERCP işlem kalemi Takip'te tek `19.08 ERCP` satırına birleştirilir.
+- TANI, OP ve PLAN 11 punto; rejim, yatış ve operasyon tarihi 10 punto yazılır. Rejim satırı `POSTOP 4-R1/Açık sıvı` biçimindedir; gerçekleşmiş ameliyat yoksa yatıştan itibaren `PREOP` kullanılır.
 
 ## Not
 

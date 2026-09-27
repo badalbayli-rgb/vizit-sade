@@ -1,6 +1,7 @@
 (() => {
   /********************************************************************
-   * VİZİT SADE V1.6 KLİNİK PANEL
+   * VİZİT SADE V1.7 KLİNİK PANEL
+   * - V1.7: ERCP işlem paketi tek Takip satırı; punto ve PREOP/POSTOP rejim biçimi güncellendi.
    * - V1.6: BH alanında negatif/generic rapor metinlerinden yanlış CA üretimi engellendi.
    * - V1.5: görüntülemeler son 45 gün, abdomen USG ayrıntılı; tüm tetkik adları Takip'te.
    * - V1.4: rapor bölüm kuralları, diğer görüntülemeler Takip'te, aktif servis sayısı ve sabit export menüsü.
@@ -1614,9 +1615,9 @@
 
   function operationBadge(p) {
     const list = (p.surgeries || []).filter((s) => surgeryDateMs(s));
-    if (!list.length) return "";
-    const now = Date.now();
     const admission = parseTrDate(p.yatis);
+    if (!list.length) return admission ? "PREOP" : "";
+    const now = Date.now();
     const monthAgo = now - 31 * 24 * 60 * 60 * 1000;
     const recent = list.filter((s) => {
       const t = surgeryDateMs(s);
@@ -1628,11 +1629,12 @@
       .sort((a, b) => surgeryDateMs(a) - surgeryDateMs(b))[0];
     if (future) return "PREOP";
 
-    const past = candidates
-      .filter((s) => startOfDayMs(surgeryDateMs(s)) <= startOfDayMs(now))
-      .sort((a, b) => surgeryDateMs(b) - surgeryDateMs(a))[0];
-    if (!past) return "";
-    return `POSTOP-${Math.max(0, dayDiff(surgeryDateMs(past), now))}`;
+    const performed = candidates
+      .map((s) => ({ s, actual:parseTrDate(s.startDate || s.endDate || "") }))
+      .filter((item) => item.actual && item.actual <= now)
+      .sort((a, b) => b.actual - a.actual)[0];
+    if (!performed) return admission ? "PREOP" : "";
+    return `POSTOP-${Math.max(0, dayDiff(performed.actual, now))}`;
   }
 
   function consultKey(c) {
@@ -5681,7 +5683,7 @@ ${consults || "-"}
       </style>
       <header id="fsl-drag-handle" class="vs-header" style="display:grid;grid-template-columns:minmax(210px,.7fr) minmax(280px,1.2fr) auto;align-items:center;gap:10px;padding:7px 9px;background:${t.header};color:${t.headerText};cursor:${state.popupMode ? "default" : "move"};user-select:none;border-bottom:1px solid ${t.border};">
         <div style="min-width:0;">
-          <b style="font-size:14px;">FONET Servis Canlı Paneli · VİZİT SADE V1.6</b>
+          <b style="font-size:14px;">FONET Servis Canlı Paneli · VİZİT SADE V1.7</b>
           <div style="font-size:10px;color:#bfdbfe;margin-top:2px;"><span id="fsl-status">hazır</span> · Son güncelleme <span id="fsl-last-updated">--:--</span></div>
         </div>
         <div class="vs-header-mid" style="display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;border:1px solid ${t.border};border-radius:7px;background:${t.surface};overflow:hidden;min-width:0;">
@@ -6075,8 +6077,12 @@ ${consults || "-"}
     const past = surgeries.filter((x) => surgeryDateMs(x) <= now).sort((a,b) => surgeryDateMs(b) - surgeryDateMs(a));
     const future = surgeries.filter((x) => surgeryDateMs(x) > now).sort((a,b) => surgeryDateMs(a) - surgeryDateMs(b));
     const selected = past[0] || future[0];
-    const performed = past.find((x) => clean(x.name || "") && (x.startDate || x.endDate)) ||
-      past.find((x) => clean(x.name || "")) || null;
+    const performed = surgeries.filter((x) => {
+      const actual = parseTrDate(x.startDate || x.endDate || "");
+      return clean(x.name || "") && actual && actual <= now;
+    }).sort((a, b) =>
+      parseTrDate(b.startDate || b.endDate) - parseTrDate(a.startDate || a.endDate)
+    )[0] || null;
     return {
       date: aoeDate(selected.startDate || selected.baslangicTarihi || selected.endDate || selected.bitisTarihi || selected.requestDate || selected.istekTarihi),
       badge: operationBadge(p) || "",
@@ -6099,8 +6105,9 @@ ${consults || "-"}
   }
 
   function aoePostopRegime(p, surgery, diet) {
-    const badge = clean(surgery.badge || "");
-    const regime = [diet.code, diet.extra].filter((x) => x && x !== "-").join(" / ");
+    const rawBadge = clean(surgery.badge || (parseTrDate(p.yatis) ? "PREOP" : ""));
+    const badge = rawBadge.replace(/^POSTOP-(\d+)$/i, "POSTOP $1").replace(/^PREOP(?:-\d+)?$/i, "PREOP");
+    const regime = [diet.code, diet.extra].filter((x) => x && x !== "-").join("/").replace(/\s*\/\s*/g, "/");
     return [badge, regime].filter(Boolean).join("-") || "—";
   }
 
@@ -6150,6 +6157,36 @@ ${consults || "-"}
     return parts.length ? parts.join(", ") : "Kan hazırlığı";
   }
 
+  function aoeCollapseErcpBundle(events) {
+    const categories = [
+      /endoskopik.*biliyer.*ste(?:nt|nd).*yerlest/,
+      /endoskopik.*(?:sfinkterotomi|sifinkterotomi)/,
+      /koledok.*(?:balon|basket).*tas.*cikar/,
+      /endoskopik.*retrograd.*kolanji.*pank/
+    ];
+    const byDate = new Map();
+    events.forEach((event, index) => {
+      if (event.group !== 1) return;
+      const dateKey = shortDate(event.date);
+      if (!dateKey) return;
+      const name = searchNorm(event.label);
+      const category = categories.findIndex((pattern) => pattern.test(name));
+      if (category < 0 && !/^ercp$/.test(name)) return;
+      const group = byDate.get(dateKey) || { categories:new Set(), indexes:[], date:event.date };
+      if (category >= 0) group.categories.add(category);
+      group.indexes.push(index);
+      byDate.set(dateKey, group);
+    });
+    const remove = new Set();
+    const compact = [];
+    byDate.forEach((group, dateKey) => {
+      if (group.categories.size !== categories.length) return;
+      group.indexes.forEach((index) => remove.add(index));
+      compact.push({ key:`1|ercp|${dateKey}`, group:1, label:"ERCP", date:group.date, compact:true });
+    });
+    return [...events.filter((event, index) => !remove.has(index)), ...compact];
+  }
+
   function aoeFollowEvents(p) {
     const events = [];
     const add = (group, label, date) => {
@@ -6176,11 +6213,13 @@ ${consults || "-"}
       const blood = aoeBloodPreparationLabel(item.text, item.amount);
       if (blood) add(4, blood, item.date);
     });
-    return events.sort((a, b) => a.group - b.group || (parseTrDate(b.date) || 0) - (parseTrDate(a.date) || 0));
+    return aoeCollapseErcpBundle(events)
+      .sort((a, b) => a.group - b.group || (parseTrDate(b.date) || 0) - (parseTrDate(a.date) || 0));
   }
 
   function aoeFollowEventLine(event) {
-    return (shortDate(event.date) || aoeDate(event.date) || "—") + ": " + event.label;
+    const date = shortDate(event.date) || aoeDate(event.date) || "—";
+    return date + (event.compact ? " " : ": ") + event.label;
   }
 
   function aoePatientKeys(p) {
@@ -6368,7 +6407,9 @@ ${consults || "-"}
     const clinicalRow = aoeLatestClinical(p);
     const followEvents = aoeFollowEvents(p);
     const clinical = followEvents.map((event) =>
-      "<div><b>" + aoeEsc(shortDate(event.date) || aoeDate(event.date) || "—") + ":</b> " + aoeEsc(event.label) + "</div>"
+      "<div>" + (event.compact
+        ? "<b>" + aoeEsc(aoeFollowEventLine(event)) + "</b>"
+        : "<b>" + aoeEsc(shortDate(event.date) || aoeDate(event.date) || "—") + ":</b> " + aoeEsc(event.label)) + "</div>"
     ).join("") + (clinicalRow
       ? "<div><b>(" + aoeEsc(aoeDate(clinicalRow.date || clinicalRow.tarih) || "—") + ")</b> " +
         aoeEsc(clinicalRow.text || clinicalRow.klinikIzlem || clinicalRow.aciklama || "") + "</div>"
@@ -6392,12 +6433,12 @@ ${consults || "-"}
       ? visitLabTableHtml(p.labs || {}, latestVitalLine(p.vitals || [], p)) : "";
     return '<section class="patient">' +
       '<div class="patient-title">' + aoeEsc(title) + '</div><div class="section-gap">&nbsp;</div>' +
-      '<div><b>TANI:</b> ' + aoeEsc(fixed.diagnosis || "") + '</div>' +
-      '<div><b>OP:</b> ' + aoeEsc(fixed.operation || "—") + '</div>' +
-      '<div><b>PLAN:</b> ' + aoeEsc(fixed.plan || "—") + '</div>' +
-      '<div><b>POSTOP-REJİM:</b> ' + aoeEsc(aoePostopRegime(p, surgery, diet)) + '</div>' +
-      '<div><b>Yatış Tarihi:</b> ' + aoeEsc(fixed.admission || "—") + '</div>' +
-      '<div><b>Op Tarihi:</b> ' + aoeEsc(fixed.surgeryDate || "—") + '</div>' +
+      '<div class="major-field"><b>TANI:</b> ' + aoeEsc(fixed.diagnosis || "") + '</div>' +
+      '<div class="major-field"><b>OP:</b> ' + aoeEsc(fixed.operation || "—") + '</div>' +
+      '<div class="major-field"><b>PLAN:</b> ' + aoeEsc(fixed.plan || "—") + '</div>' +
+      '<div class="date-regime-field"><b>' + aoeEsc(aoePostopRegime(p, surgery, diet)) + '</b></div>' +
+      '<div class="date-regime-field"><b>Yatış Tarihi:</b> ' + aoeEsc(fixed.admission || "—") + '</div>' +
+      '<div class="date-regime-field"><b>Op Tarihi:</b> ' + aoeEsc(fixed.surgeryDate || "—") + '</div>' +
       '<div><b>BH:</b> ' + aoeEsc(fixed.bh || "—") + '</div>' +
       '<div><b>Kİ:</b> ' + aoeEsc(fixed.ki || "—") + '</div>' +
       '<div><b>GO:</b> ' + aoeEsc(fixed.go || "—") + '</div>' +
@@ -6448,6 +6489,7 @@ ${consults || "-"}
       '.patient,.patient *{font-family:Tahoma,Arial,sans-serif;font-size:9pt}' +
       '.patient{margin:0;padding:0;line-height:1.03}' +
       '.patient-title{font-size:15pt;line-height:1.0;font-weight:bold;margin:0 0 1pt}' +
+      '.major-field,.major-field *{font-size:11pt!important}.date-regime-field,.date-regime-field *{font-size:10pt!important}' +
       '.clinic-heading{text-align:center;font-size:12pt;font-weight:bold;margin:0 0 8pt;border-bottom:1px solid #555;padding-bottom:2pt}' +
       '.consult-item+.consult-item,.nursing-item+.nursing-item{margin-top:9pt!important}' +
       '.imaging-item.has-report:not(:last-child){margin-bottom:10pt!important}' +
@@ -6576,12 +6618,12 @@ ${consults || "-"}
     const paragraphs = [
       aoeWordParagraph(title, { size:15, bold:true, keep:true }),
       aoeWordParagraph("", { size:9 }),
-      aoeWordParagraph("TANI: " + (fixed.diagnosis || ""), { size:9, bold:true }),
-      aoeWordParagraph("OP: " + (fixed.operation || "—"), { size:9, bold:true }),
-      aoeWordParagraph("PLAN: " + (fixed.plan || "—"), { size:9, bold:true }),
-      aoeWordParagraph("POSTOP-REJİM: " + aoePostopRegime(p, surgery, diet), { size:9, bold:true }),
-      aoeWordParagraph("Yatış Tarihi: " + (fixed.admission || "—"), { size:9, bold:true }),
-      aoeWordParagraph("Op Tarihi: " + (fixed.surgeryDate || "—"), { size:9, bold:true }),
+      aoeWordParagraph("TANI: " + (fixed.diagnosis || ""), { size:11, bold:true }),
+      aoeWordParagraph("OP: " + (fixed.operation || "—"), { size:11, bold:true }),
+      aoeWordParagraph("PLAN: " + (fixed.plan || "—"), { size:11, bold:true }),
+      aoeWordParagraph(aoePostopRegime(p, surgery, diet), { size:10, bold:true }),
+      aoeWordParagraph("Yatış Tarihi: " + (fixed.admission || "—"), { size:10, bold:true }),
+      aoeWordParagraph("Op Tarihi: " + (fixed.surgeryDate || "—"), { size:10, bold:true }),
       aoeWordParagraph("BH: " + (fixed.bh || "—"), { size:9 }),
       aoeWordParagraph("Kİ: " + (fixed.ki || "—"), { size:9 }),
       aoeWordParagraph("GO: " + (fixed.go || "—"), { size:9 }),
@@ -6606,10 +6648,12 @@ ${consults || "-"}
     paragraphs.push(aoeWordParagraph("", { size:9 }));
     paragraphs.push(aoeWordParagraph("Takip:", { size:9, bold:true, keep:true }));
     const followEvents = aoeFollowEvents(p);
-    followEvents.forEach((event) => paragraphs.push(aoeWordRichParagraph([
-      { text:(shortDate(event.date) || aoeDate(event.date) || "—") + ": ", bold:true },
-      { text:event.label }
-    ], { size:9 })));
+    followEvents.forEach((event) => paragraphs.push(event.compact
+      ? aoeWordParagraph(aoeFollowEventLine(event), { size:9, bold:true })
+      : aoeWordRichParagraph([
+        { text:(shortDate(event.date) || aoeDate(event.date) || "—") + ": ", bold:true },
+        { text:event.label }
+      ], { size:9 })));
     const clinicalRow = aoeLatestClinical(p);
     if (clinicalRow) paragraphs.push(aoeWordParagraph(
       "(" + (aoeDate(clinicalRow.date || clinicalRow.tarih) || "—") + ") " +

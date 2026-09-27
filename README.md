@@ -49,6 +49,7 @@ Google Docs seçeneği biçimi koruyan DOCX dosyasını indirir ve Google Drive'
 - EKG, PAAG, ADBG, BT, ERCP, PTK ve diğer tüm son 45 günlük görüntülemeler Takip'te yalnızca ad olarak listelenir.
 - Eski DOCX'te olup güncel FONET hasta listesinde olmayan hastalar belgenin en sonunda kırmızı korunur.
 - Eski DOCX'ten eşleşen hastaların sabit alanları kilitli kalır. Yeni hastaların tanısında en son yanıtlanan Genel Cerrahi konsültasyonu, yoksa FONET tanı listesi kullanılır.
+- BH alanına `CA` yalnızca doğrulanmış kanser ifadesi varsa eklenir; "malignite/tümör izlenmedi" ve kalsiyum gibi kullanımlar CA sayılmaz.
 
 ## Not
 

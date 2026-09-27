@@ -1,6 +1,7 @@
 (() => {
   /********************************************************************
-   * VİZİT SADE V1.5 KLİNİK PANEL
+   * VİZİT SADE V1.6 KLİNİK PANEL
+   * - V1.6: BH alanında negatif/generic rapor metinlerinden yanlış CA üretimi engellendi.
    * - V1.5: görüntülemeler son 45 gün, abdomen USG ayrıntılı; tüm tetkik adları Takip'te.
    * - V1.4: rapor bölüm kuralları, diğer görüntülemeler Takip'te, aktif servis sayısı ve sabit export menüsü.
    * - V1.3: AutoExport yatış sonrası kons, seçili görüntüleme, güncel tanı ve kayıp hasta sonu.
@@ -2581,12 +2582,31 @@
   }
 
   function aoeHasCancerEvidence(text) {
-    return /malignite|kanser|karsinom|adenokarsinom|neoplazm|t[üu]m[öo]r|lenfoma|l[öo]semi|\b(?:mide|kolon|rektum|pankreas|meme|akci[ğg]er|karaci[ğg]er|prostat|over|endometrium|serviks|tiroid|[öo]zofagus|mesane|b[öo]brek|koledok|safra\s+yolu)\s+ca\b/i.test(String(text || ""));
+    const source = String(text || "");
+    const evidence = /adenokarsinom|karsinom|lenfoma|l[öo]semi|malignite|kanser|neoplazm|\b(?:mide|kolon|rektum|pankreas|meme|akci[ğg]er|karaci[ğg]er|prostat|over|endometrium|serviks|tiroid|[öo]zofagus|mesane|b[öo]brek|koledok|safra\s+yolu)\s+ca\b/gi;
+    for (const match of source.matchAll(evidence)) {
+      const before = source.slice(Math.max(0, match.index - 30), match.index);
+      const after = source.slice(match.index + match[0].length, match.index + match[0].length + 40);
+      const negatedBefore = /(?:yok|değil|saptanmad[\u0131i]|izlenmed[\u0131i]|düşünülmed[\u0131i]|ekarte)\s*(?:edildi)?\s*$/i.test(before);
+      const negatedAfter = /^\s*(?:öyküsü|bulgusu|açısından\s+bulgu|lehine\s+bulgu|ile\s+uyumlu\s+bulgu)?\s*(?:yok|değil|saptanmad[\u0131i]|izlenmed[\u0131i]|düşünülmed[\u0131i]|ekarte)/i.test(after);
+      if (!negatedBefore && !negatedAfter) return true;
+    }
+    return false;
+  }
+
+  function aoeSanitizeKnownDiseases(value, p) {
+    const original = clean(value || "");
+    if (!/\bCA\b/i.test(original) || aoeHasCancerEvidence(patientFreeText(p))) return original;
+    return clean(original
+      .replace(/\bCA\b/gi, "")
+      .replace(/\s*[,;+\/]\s*$/g, "")
+      .replace(/^\s*[,;+\/]\s*/g, "")
+      .replace(/\s*[,;+\/]\s*[,;+\/]\s*/g, ", "));
   }
 
   function extractKnownDiseases(p) {
     const direct = clean(p.knownDiseases || p.anesthesia?.knownDiseases || "");
-    if (direct) return clip(direct, 80);
+    if (direct) return clip(aoeSanitizeKnownDiseases(direct, p), 80);
 
     const text = patientFreeText(p);
     const found = [];
@@ -5661,7 +5681,7 @@ ${consults || "-"}
       </style>
       <header id="fsl-drag-handle" class="vs-header" style="display:grid;grid-template-columns:minmax(210px,.7fr) minmax(280px,1.2fr) auto;align-items:center;gap:10px;padding:7px 9px;background:${t.header};color:${t.headerText};cursor:${state.popupMode ? "default" : "move"};user-select:none;border-bottom:1px solid ${t.border};">
         <div style="min-width:0;">
-          <b style="font-size:14px;">FONET Servis Canlı Paneli · VİZİT SADE V1.5</b>
+          <b style="font-size:14px;">FONET Servis Canlı Paneli · VİZİT SADE V1.6</b>
           <div style="font-size:10px;color:#bfdbfe;margin-top:2px;"><span id="fsl-status">hazır</span> · Son güncelleme <span id="fsl-last-updated">--:--</span></div>
         </div>
         <div class="vs-header-mid" style="display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;border:1px solid ${t.border};border-radius:7px;background:${t.surface};overflow:hidden;min-width:0;">
@@ -6209,7 +6229,7 @@ ${consults || "-"}
       plan: clean(p.plan || ""),
       admission: aoeDate(p.yatis || ""),
       surgeryDate: clean(surgery.date || ""),
-      bh: clean(meta.bh || p.knownDiseases || consultFacts.bh || ""),
+      bh: aoeSanitizeKnownDiseases(clean(meta.bh || p.knownDiseases || consultFacts.bh || ""), p),
       ki: clean(meta.ki || p.homeMeds || consultFacts.ki || ""),
       go: clean(meta.go || p.plannedOperation || consultFacts.go || "")
     };
@@ -6226,9 +6246,7 @@ ${consults || "-"}
           if (Object.prototype.hasOwnProperty.call(saved, field)) locked[field] = clean(saved[field] || "");
         });
         const merged = { ...live, ...locked };
-        if (/\bCA\b/i.test(merged.bh || "") && !aoeHasCancerEvidence(patientFreeText(p))) {
-          merged.bh = clean(String(merged.bh).replace(/\bCA\b/gi, "").replace(/\s*[,;+\/]\s*$/g, "").replace(/^\s*[,;+\/]\s*/g, "").replace(/\s*[,;+\/]\s*[,;+\/]\s*/g, ", "));
-        }
+        merged.bh = aoeSanitizeKnownDiseases(merged.bh, p);
         return merged;
       }
     }

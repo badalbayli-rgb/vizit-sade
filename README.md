@@ -42,7 +42,10 @@ Google Docs seçeneği biçimi koruyan DOCX dosyasını indirir ve Google Drive'
 - Takip: tarihli klinik izlem kayıtları
 - Gözlem: en güncel hemşire devir notu
 - Tarihli görüntüleme ve konsültasyon bölümleri
-- Exportta yalnızca Görüntüleme ve Konsültasyonlar listeleri son bir takvim ayıyla sınırlandırılır; tanı, BH, Kİ, GO ve diğer alanlar mevcut tüm veriden üretilmeye devam eder.
+- Exportta konsültasyonlar hem son bir takvim ayıyla hem de hastanın yatış tarih-saatinden sonrasıyla sınırlandırılır.
+- Görüntülemede yalnızca alt/üst/tüm abdomen BT, toraks BT, MRCP, ERCP ve PTK gösterilir.
+- Eski DOCX'te olup güncel FONET hasta listesinde olmayan hastalar belgenin en sonunda kırmızı korunur.
+- Eski DOCX'ten eşleşen hastaların sabit alanları kilitli kalır. Yeni hastaların tanısında en son yanıtlanan Genel Cerrahi konsültasyonu, yoksa FONET tanı listesi kullanılır.
 
 ## Not
 

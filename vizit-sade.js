@@ -1,6 +1,7 @@
 (() => {
   /********************************************************************
-   * VİZİT SADE V1.2 KLİNİK PANEL
+   * VİZİT SADE V1.3 KLİNİK PANEL
+   * - V1.3: AutoExport yatış sonrası kons, seçili görüntüleme, güncel tanı ve kayıp hasta sonu.
    * - V1.2: exportta görüntüleme ve konsültasyonlar yalnızca son bir takvim ayı.
    * - V1.1: kompakt üst bar, servis özeti, birleşik filtreler, 4-5 sütun kartlar,
    *   sağ detay çekmecesi, bağımsız ayarlar ve parçalı kart güncellemesi
@@ -3511,6 +3512,11 @@ ${consults || "-"}
         id: x.id,
         date: x.birimSevk?.sevkTarihi || x.etar || "",
         unit: x.birimSevk?.birim?.adi || "",
+        answerDate: x.sonucTarihi || x.cevapTarihi || x.sonucKayitTarihi || x.sonucOnayTarihi || x.guncellemeTarihi || "",
+        answerUnit: clean(
+          x.sonucBirim?.adi || x.cevapBirim?.adi || x.konsultasyonBirim?.adi ||
+          x.birimSevk?.birim?.adi || ""
+        ),
         answer,
         request: x.istemSebebi || "",
         status: x.durum,
@@ -5877,11 +5883,32 @@ ${consults || "-"}
   }
 
   function aoeRecentConsults(p) {
-    return (p.consults || []).filter((x) => aoeWithinLastMonth(x.date || x.tarih || x.requestDate || x.istemTarihi));
+    const admission = parseTrDate(p.yatis || p.admission || p.yatisTarihi || "");
+    return (p.consults || []).filter((x) => {
+      const value = x.date || x.tarih || x.requestDate || x.istemTarihi;
+      const stamp = parseTrDate(value);
+      return aoeWithinLastMonth(value) && (!admission || (stamp && stamp >= admission));
+    });
+  }
+
+  function aoeAllowedImaging(item) {
+    const value = searchNorm(aoeImagingName(item))
+      .replace(/\bcomputed tomography\b/g, " bt ")
+      .replace(/\bct\b/g, " bt ")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!value) return false;
+    if (/\b(mrcp|ercp|ptk)\b/.test(value)) return true;
+    const isBt = /\bbt\b/.test(value);
+    if (!isBt) return false;
+    return /\btoraks\b/.test(value) ||
+      (/\babdomen\b/.test(value) && /\b(alt|ust|tum|total)\b/.test(value));
   }
 
   function aoeRecentImaging(p) {
-    return (p.radiology || []).filter((x) => aoeWithinLastMonth(x.date || x.reportDate || x.tarih || x.raporTarihi));
+    return (p.radiology || []).filter((x) =>
+      aoeWithinLastMonth(x.date || x.reportDate || x.tarih || x.raporTarihi) && aoeAllowedImaging(x)
+    );
   }
 
   function aoeDrugName(value) {
@@ -5932,6 +5959,31 @@ ${consults || "-"}
     }).filter(Boolean);
   }
 
+  function aoeDiagnosisFromConsultAnswer(answer) {
+    const text = cleanMultiline(answer || "");
+    if (!text) return "";
+    const explicit = text.match(/(?:^|\n|[.;])\s*(?:on\s*)?tan[ıi]\s*[:\-]\s*([^\n;]+?)(?=\s+(?:BH|Kİ|KI|GO|ASA|PLAN|ÖNERİ)\s*[:\-]|$)/i)?.[1];
+    if (explicit) return clean(explicit);
+    const sentences = text.split(/(?<=[.!?])\s+|\n+/).map(clean).filter(Boolean);
+    for (const sentence of sentences) {
+      const admission = sentence.match(/(?:hastan[ıi]n\s+)?(.{3,120}?)\s+(tan[ıi]s[ıi]|nedeni)\s+ile\s+(?:yat[ıi]ş[ıi]|yatisi|yat[ıi]ş|yatis)\s+(?:uygundur|uygun)/i);
+      if (admission) return clean((admission[1] + " " + admission[2]).replace(/^(hasta|hastan[ıi]n|mevcut)\s+/i, ""));
+      const diagnosed = sentence.match(/(?:^|\s)(.{3,120}?)\s+tan[ıi]s[ıi]\s+(?:düşünüldü|konuldu|mevcuttur|ile takipli)/i);
+      if (diagnosed) return clean(diagnosed[1]);
+    }
+    return "";
+  }
+
+  function aoeLatestGeneralSurgeryDiagnosis(p) {
+    const rows = (p.consults || []).filter((item) => {
+      const unit = searchNorm(item.answerUnit || item.unit || "");
+      return clean(item.answer) && /genel\s*cerrahi/.test(unit);
+    }).slice().sort((a, b) =>
+      (parseTrDate(b.answerDate || b.date) || 0) - (parseTrDate(a.answerDate || a.date) || 0)
+    );
+    return rows.length ? aoeDiagnosisFromConsultAnswer(rows[0].answer) : "";
+  }
+
   function aoeConsultFacts(p) {
     const allAnswers = (p.consults || []).map((x) => cleanMultiline(x.answer || "")).filter(Boolean);
     const text = allAnswers.join("\n");
@@ -5939,18 +5991,7 @@ ${consults || "-"}
       const pattern = new RegExp("(?:^|\\n|[.;])\\s*" + label + "\\s*[:\\-]\\s*([^\\n;]+?)(?=\\s+(?:BH|Kİ|KI|GO|ASA)\\s*[:\\-]|$)", "i");
       return clean(text.match(pattern)?.[1] || "");
     };
-    let diagnosis = "";
-    for (const answer of allAnswers) {
-      const sentences = answer.split(/(?<=[.!?])\s+|\n+/).map(clean).filter(Boolean);
-      for (const sentence of sentences) {
-        const match = sentence.match(/(?:hastanın\s+)?(.{3,100}?)\s+(tanısı|tanisi|nedeni)\s+ile\s+(?:yatışı|yatisi|yatış|yatis)\s+(?:uygundur|uygun)/i);
-        if (match) {
-          diagnosis = clean((match[1] + " " + match[2]).replace(/^(hasta|hastanın|mevcut)\s+/i, ""));
-          break;
-        }
-      }
-      if (diagnosis) break;
-    }
+    const diagnosis = aoeLatestGeneralSurgeryDiagnosis(p);
     return {
       diagnosis,
       bh: field("BH"),
@@ -6600,6 +6641,8 @@ ${consults || "-"}
     });
     const configuredOrder = new Map(aoeEffectiveClinicOrder().map((name, index) => [norm(name), index]));
     entries.sort((a, b) => {
+      // Eski dosyada bulunup güncel FONET listesinde olmayan hastalar daima en sonda kalır.
+      if (a.missing !== b.missing) return a.missing ? 1 : -1;
       const priority = aoeClinicPriority(a.clinic) - aoeClinicPriority(b.clinic);
       if (priority) return priority;
       const configured = (configuredOrder.get(norm(a.clinic)) ?? 999) - (configuredOrder.get(norm(b.clinic)) ?? 999);

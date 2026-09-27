@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Vizit Sade — Bookmarklet Kurulumu</title>
+  <style>
+    *{box-sizing:border-box}body{margin:0;background:#eef4fb;color:#142033;font:16px/1.5 Arial,sans-serif}
+    main{max-width:760px;margin:48px auto;padding:28px;background:#fff;border:1px solid #c8d5e5;border-radius:16px;box-shadow:0 18px 50px #183a641c}
+    h1{margin:0 0 8px;font-size:30px}p{color:#485a70}.steps{padding-left:22px}.steps li{margin:10px 0}
+    .bookmark{display:inline-block;margin:18px 0;padding:15px 24px;border-radius:9px;background:#075ca8;color:#fff;text-decoration:none;font-size:19px;font-weight:700;cursor:grab;box-shadow:0 8px 22px #075ca83b}
+    .bookmark:active{cursor:grabbing}.copy{display:block;border:0;border-radius:7px;padding:11px 16px;background:#166534;color:#fff;font-weight:700;cursor:pointer}
+    .note{margin-top:18px;padding:12px;background:#fff8dc;border-left:4px solid #d49a00;border-radius:5px}.ok{color:#166534;font-weight:700}
+  </style>
+</head>
+<body>
+<main>
+  <h1>Vizit Sade</h1>
+  <p>Fonet servis hasta listesindeki hastaları tarayıp toplu vizit kağıdı hazırlayan bookmarklet.</p>
+  <ol class="steps">
+    <li>Tarayıcınızda yer imleri çubuğunu açın (<b>Ctrl+Shift+B</b>).</li>
+    <li>Aşağıdaki mavi düğmeyi yer imleri çubuğuna <b>sürükleyip bırakın</b>.</li>
+    <li>Fonet servis hasta listesini açın ve eklediğiniz <b>Vizit Sade</b> yer imine basın.</li>
+  </ol>
+  <a id="bookmark" class="bookmark" title="Bu düğmeyi yer imleri çubuğuna sürükleyin"
+     href="javascript:(async()=>{try{const u='https://raw.githubusercontent.com/badalbayli-rgb/vizit-sade/main/vizit-sade.js';const r=await fetch(u+'?t='+Date.now(),{cache:'no-store',credentials:'omit'});if(!r.ok)throw new Error('GitHub HTTP '+r.status);const c=await r.text();if(!c.includes('__VIZIT_SADE__'))throw new Error('Vizit Sade dosyasi dogrulanamadi');(0,eval)(c+'\n//# sourceURL=vizit-sade.js')}catch(e){alert('Vizit Sade yuklenemedi:\n'+(e&&e.message?e.message:e))}})()">Vizit Sade</a>
+  <button id="copy" class="copy" type="button">Bookmarklet kodunu kopyala</button>
+  <p id="result" aria-live="polite"></p>
+  <div class="note">Telefon tarayıcıları sürükle-bırak desteklemeyebilir. Bilgisayarda Chrome veya Edge kullanılması önerilir.</div>
+</main>
+<script>
+  document.getElementById('copy').addEventListener('click',async()=>{
+    const value=document.getElementById('bookmark').href;
+    try{await navigator.clipboard.writeText(value);document.getElementById('result').innerHTML='<span class="ok">Kopyalandı.</span> Yer iminin adres alanına yapıştırın.'}
+    catch(e){document.getElementById('result').textContent='Kopyalanamadı; mavi düğmeyi sürükleyin.'}
+  });
+</script>
+</body>
+</html>

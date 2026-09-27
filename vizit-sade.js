@@ -1,0 +1,7006 @@
+(() => {
+  /********************************************************************
+   * VİZİT SADE V1.1 KLİNİK PANEL
+   * - V1.1: kompakt üst bar, servis özeti, birleşik filtreler, 4-5 sütun kartlar,
+   *   sağ detay çekmecesi, bağımsız ayarlar ve parçalı kart güncellemesi
+   * - Kullanıcı tek tek hasta açmadan açık servis hasta listesini toplar
+   * - DOM tablo + ExtJS grid store okumayı dener
+   * - Hastaları vizit kartı formatında aynı panelde gösterir
+   * - V2: yakalanan endpointlerle hasta detay/lab/kons/order/devir/radyoloji arka plan sorgusu dener
+   * - V3: kart birleştirme, tıklayınca büyük detay, görünür hata/ID tanısı
+   * - V4: eksik hastaGelisId tamamlama, lab/kons fallback, vizit kağıdı hazırla
+   * - V5: vital endpointi, 5+ gün lab geçmişi, endpoint durum metni düzeltmesi
+   * - V6: diyet alanları genişletildi, son 10 saat kons cevabı/okundu mantığı
+   * - V6.1: kısa diyet kartı ve bugünkü kons takip kartı
+   * - V6.2: ayrı popup panel, network getKayit diyet yakalama
+   * - V6.3: kart boyutu/sıralama ve güncelleme içeriği etiketi
+   * - V6.4: radyoloji rapor metni, yeni yatış uyarısı, tıklayana kadar kalan güncelleme etiketi
+   * - V6.5: beyaz vizit ekranı ve gerekli lab tarihini kullanma
+   * - V6.6: vizit kartı görünümü
+   * - V6.7: kart başlığı doktor baş harfleri
+   * - V6.8: preop/postop ameliyat istem tarihinden hesaplanır
+   * - V6.9: anestezi formundan ASA/BH/Kİ/GO/Yer yakalama
+   * - V6.10: kart scroll koruma, üstte vital/lab özeti ve glukoz
+   * - V6.11: 1080p kompakt kart, belirgin vital ve hover büyütme
+   * - V6.12: hover büyütme 1.4x ve animasyonsuz
+   * - V6.13: radyoloji rapor metni yenilemede korunur
+   * - V6.14: PCT ayrımı, lab tarihi ana takip kanlarına göre, Na/K/P/Ca/Mg
+   * - V6.15: glukometre/idrar/kan gazı ana lab tarihine karışmaz
+   * - V6.17: idrar WBC sonuçları hemogram WBC serisine karışmaz
+   * - V6.18: günlük kons kartlarında bekleyen turuncu, tamamı kapanan mor
+   * - V6.19: kons cevabı yalnızca gerçek Sonuç Açıklama metnine göre belirlenir
+   * - V6.20: içeriksiz bildirimler engellendi, telefona değişiklik ayrıntısı eklenir
+   * - V6.21: parmak ucu glukotest ana labdan ayrıldı, Yeni glukoz bildirimi eklendi
+   * - V6.22: aynı bildirimlerin tekrarı ve dizi sıralamasından doğan sahte güncellemeler engellendi
+   * - V6.23: günlük kons takibi her zaman son 10 saatte atılan konsları gösterir
+   * - V6.24: Ca yalnız gerçek Kalsiyum (Ca) sonuçlarını kullanır; hesaplama açıklamaları dışlanır
+   * - V6.25: hasta arama çubuğu, optimize bildirim şeridi, Google Docs uyumlu son 8 kan tablosu ve son vital vizit çıktısı
+   * - V6.40: replasman satırlarının ekrana sığdırılmak için ezilmesi kaldırıldı; sabit okunaklı satırlar ve dikey kaydırma eklendi
+   * - V6.41: vizit çıktısında sistem tanısı korunur ve OP alanına gerçekleşen ameliyatın adı yazılır
+   * - V6.42: yüklenen DOCX'teki elle düzenlenmiş sabit alanlar ve açık listede olmayan hasta blokları aynen korunur
+   * - V6.43: kalsiyum/laboratuvar Ca ifadelerinin yanlışlıkla kanser hastalığı olarak işaretlenmesi engellendi
+   * - V6.44: yüklenen DOCX'teki sabit alanlar boş olsalar da kilitlenir; Word satır sonları güvenilir okunur
+ * - V6.47: DOCX satır sonları ile oda/ad eşleştirmesi güçlendirildi; aynı hastanın yanlışlıkla kırmızı olması önlendi
+ * - V6.48: eski, yeni ve listede olmayan hastalar birlikte klinik 2-1-3-4 ve oda sırasına yerleştirilir
+   * - V6.39: kompakt replasman satırlarında yazı, kolon, kontrast ve satır yüksekliği okunaklı hale getirildi
+   * - V6.38: FONET düzeltilmiş kalsiyumu ayrı gösterilir; Ca replasmanı dCa ile değerlendirilir; Lab satırı kan alma günlerini listeler
+   * - V6.37: replasman sırası FONET ile eşlendi; öneriler açılır kompakt listeye taşındı
+   * - V6.36: ayrı replasman sekmesi ve vizit kağıdı takip kanlarına PLT satırı
+   ********************************************************************/
+
+  if (window.__VIZIT_SADE__) {
+    try { window.__VIZIT_SADE__.restore?.(); } catch (e) {}
+  }
+
+  const state = {
+    patients: [],
+    requests: [],
+    seen: {},
+    monitor: null,
+    visibilityHandler: null,
+    renderTimer: null,
+    original: {},
+    active: true,
+    lastMessage: "",
+    busy: false,
+    bootstrapStarted: false,
+    bootstrapComplete: false,
+    pendingForceRefresh: false,
+    selectedKey: "",
+    ackConsults: {},
+    panelWindow: null,
+    popupMode: false,
+    cardWidth: (() => { try { return Number(localStorage.getItem("vizitSadeCardWidth")) || 290; } catch (e) { return 290; } })(),
+    cardHeight: (() => { try { return Number(localStorage.getItem("vizitSadeCardHeight")) || 320; } catch (e) { return 320; } })(),
+    cardOrder: [],
+    fonetOrder: [],
+    sortMode: (() => { try { return localStorage.getItem("vizitSadeSortMode") || "fonet"; } catch (e) { return "fonet"; } })(),
+    pinnedKeys: (() => { try { return JSON.parse(localStorage.getItem("vizitSadePinnedKeys") || "[]"); } catch (e) { return []; } })(),
+    pausedKeys: (() => { try { return JSON.parse(localStorage.getItem("vizitSadePausedKeys") || "[]"); } catch (e) { return []; } })(),
+    thresholds: (() => { try { return { tempHigh:38, spo2Low:92, pulseLow:50, pulseHigh:120, sysLow:90, sysHigh:180, glucoseLow:70, glucoseHigh:250, potassiumLow:3, potassiumHigh:6, ...(JSON.parse(localStorage.getItem("vizitSadeThresholds") || "{}")) }; } catch (e) { return { tempHigh:38, spo2Low:92, pulseLow:50, pulseHigh:120, sysLow:90, sysHigh:180, glucoseLow:70, glucoseHigh:250, potassiumLow:3, potassiumHigh:6 }; } })(),
+    patientRefreshAt: {},
+    endpointFailures: {},
+    metrics: { cycles: 0, requests: 0, errors: 0, updated: 0, processed: 0, total: 0, lastCycleMs: 0, lastCycleAt: 0, nextCycleAt: 0 },
+    cardScroll: {},
+    gridScroll: 0,
+    activeView: "patients",
+    replacementNotes: (() => { try { const v = JSON.parse(localStorage.getItem("vizitSadeReplacementNotes") || "{}"); return v && typeof v === "object" ? v : {}; } catch (e) { return {}; } })(),
+    replacementDone: (() => { try { const v = JSON.parse(localStorage.getItem("vizitSadeReplacementDone") || "{}"); return v && typeof v === "object" ? v : {}; } catch (e) { return {}; } })(),
+    radiologyTextCache: {},
+    bridgeUrl: "http://127.0.0.1:8787/api/update",
+    bridgeLastSent: 0,
+    bridgeOnline: false,
+    dragCardKey: "",
+    drag: null,
+    theme: (() => {
+      try { return localStorage.getItem("vizitSadeTheme") || "clinical"; } catch (e) { return "clinical"; }
+    })(),
+    soundEnabled: (() => {
+      try { return localStorage.getItem("vizitSadeSound") !== "0"; } catch (e) { return true; }
+    })(),
+    audioCtx: null,
+    audioUnlocked: false,
+    lastSoundAt: 0
+    ,
+    searchText: "",
+    searchTimer: null,
+    uiFilters: { clinic:"", critical:false, order:false, consult:false, lab:false, postop:false },
+    lastGridSignature: "",
+    lastLayoutSignature: "",
+    cardRenderSignatures: {},
+    notificationLog: (() => {
+      try {
+        const value = JSON.parse(localStorage.getItem("vizitSadeNotifications") || "[]");
+        return Array.isArray(value) ? value.slice(0, 160) : [];
+      } catch (e) { return []; }
+    })(),
+    notificationSeen: (() => {
+      try {
+        const value = JSON.parse(localStorage.getItem("vizitSadeNotificationSeen") || "{}");
+        return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+      } catch (e) { return {}; }
+    })()
+  };
+
+  window.__VIZIT_SADE__ = state;
+
+  const THEMES = {
+    clinical: {
+      label: "Açık",
+      bg: "#edf4fb",
+      surface: "#ffffff",
+      surface2: "#f8fbff",
+      header: "#0f172a",
+      headerText: "#f8fafc",
+      text: "#0f172a",
+      muted: "#475569",
+      border: "#c9d8e8",
+      primary: "#0ea5e9",
+      primary2: "#1d4ed8",
+      accent: "#f59e0b",
+      success: "#16a34a",
+      danger: "#dc2626",
+      purple: "#a855f7",
+      tile: "#eff6ff",
+      tileBorder: "#bfdbfe",
+      shadow: "0 16px 38px rgba(15,23,42,.18)"
+    },
+    future: {
+      label: "Koyu",
+      bg: "#07111f",
+      surface: "#0c1b2e",
+      surface2: "#10253d",
+      header: "#020617",
+      headerText: "#e0f2fe",
+      text: "#e5f4ff",
+      muted: "#9cc5dd",
+      border: "#1e4d69",
+      primary: "#22d3ee",
+      primary2: "#38bdf8",
+      accent: "#facc15",
+      success: "#22c55e",
+      danger: "#fb7185",
+      purple: "#c084fc",
+      tile: "#0f2a44",
+      tileBorder: "#1e7497",
+      shadow: "0 22px 70px rgba(34,211,238,.18)"
+    },
+    scifi: {
+      label: "Bilim Kurgu",
+      bg: "#0b1020",
+      surface: "#15122a",
+      surface2: "#20173a",
+      header: "#13091f",
+      headerText: "#f5e8ff",
+      text: "#f3e8ff",
+      muted: "#c4b5fd",
+      border: "#4c1d95",
+      primary: "#8b5cf6",
+      primary2: "#06b6d4",
+      accent: "#f97316",
+      success: "#10b981",
+      danger: "#ef4444",
+      purple: "#d946ef",
+      tile: "#21173d",
+      tileBorder: "#6d28d9",
+      shadow: "0 22px 70px rgba(217,70,239,.18)"
+    },
+    nature: {
+      label: "Doğa",
+      bg: "#edf7ef",
+      surface: "#ffffff",
+      surface2: "#f3fbf5",
+      header: "#123524",
+      headerText: "#ecfdf5",
+      text: "#14211a",
+      muted: "#476356",
+      border: "#b7d8c2",
+      primary: "#059669",
+      primary2: "#0f766e",
+      accent: "#ca8a04",
+      success: "#16a34a",
+      danger: "#dc2626",
+      purple: "#7c3aed",
+      tile: "#e8f8ed",
+      tileBorder: "#a7f3d0",
+      shadow: "0 18px 42px rgba(20,83,45,.18)"
+    },
+    graphite: {
+      label: "Grafit",
+      bg: "#e5e7eb",
+      surface: "#ffffff",
+      surface2: "#f3f4f6",
+      header: "#111827",
+      headerText: "#f9fafb",
+      text: "#111827",
+      muted: "#4b5563",
+      border: "#cbd5e1",
+      primary: "#2563eb",
+      primary2: "#111827",
+      accent: "#ea580c",
+      success: "#15803d",
+      danger: "#b91c1c",
+      purple: "#7c3aed",
+      tile: "#f8fafc",
+      tileBorder: "#cbd5e1",
+      shadow: "0 18px 42px rgba(17,24,39,.22)"
+    },
+    sunrise: {
+      label: "Gün Doğumu",
+      bg: "#fff7ed",
+      surface: "#ffffff",
+      surface2: "#fffaf0",
+      header: "#431407",
+      headerText: "#fff7ed",
+      text: "#1f2937",
+      muted: "#78716c",
+      border: "#fed7aa",
+      primary: "#ea580c",
+      primary2: "#db2777",
+      accent: "#f59e0b",
+      success: "#16a34a",
+      danger: "#dc2626",
+      purple: "#9333ea",
+      tile: "#fff3df",
+      tileBorder: "#fdba74",
+      shadow: "0 18px 42px rgba(154,52,18,.16)"
+    }
+  };
+
+  function activeTheme() {
+    return THEMES[state.theme] || THEMES.clinical;
+  }
+
+  function themeOptionsHtml() {
+    return Object.entries(THEMES)
+      .map(([key, theme]) => `<option value="${key}"${key === state.theme ? " selected" : ""}>${escapeHtml(theme.label)}</option>`)
+      .join("");
+  }
+
+  function setTheme(name) {
+    state.theme = THEMES[name] ? name : "clinical";
+    try { localStorage.setItem("vizitSadeTheme", state.theme); } catch (e) {}
+    makePanel();
+  }
+
+  function soundButtonText() {
+    return state.soundEnabled ? "Ses Açık" : "Ses Kapalı";
+  }
+
+  function setSoundEnabled(value) {
+    state.soundEnabled = Boolean(value);
+    try { localStorage.setItem("vizitSadeSound", state.soundEnabled ? "1" : "0"); } catch (e) {}
+    if (state.soundEnabled) {
+      unlockNotificationSound();
+      playNotificationSound(["test"], true);
+    }
+    makePanel();
+  }
+
+  function ensureAudioContext() {
+    if (state.audioCtx) return state.audioCtx;
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return null;
+    try {
+      state.audioCtx = new Ctx();
+      return state.audioCtx;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function unlockNotificationSound() {
+    if (!state.soundEnabled) return null;
+    const ctx = ensureAudioContext();
+    if (!ctx) return null;
+    try {
+      const resume = ctx.state === "suspended" ? ctx.resume() : Promise.resolve();
+      Promise.resolve(resume).then(() => {
+        state.audioUnlocked = true;
+      }).catch(() => {});
+    } catch (e) {}
+    return ctx;
+  }
+
+  function soundPattern(labels = []) {
+    const text = norm(labels.join(" "));
+    if (/kons/.test(text) && /cevap/.test(text)) {
+      return [
+        { f: 880, d: 0.09, gap: 0.02 },
+        { f: 1175, d: 0.11, gap: 0.03 },
+        { f: 1568, d: 0.16, gap: 0 }
+      ];
+    }
+    if (/vital|lab|radyoloji|order|devir|anestezi|asa|diyet|klinik/.test(text)) {
+      return [
+        { f: 740, d: 0.10, gap: 0.03 },
+        { f: 988, d: 0.14, gap: 0 }
+      ];
+    }
+    return [
+      { f: 660, d: 0.10, gap: 0.02 },
+      { f: 880, d: 0.12, gap: 0 }
+    ];
+  }
+
+  function scheduleTone(ctx, freq, start, duration, volume = 0.11) {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(freq, start);
+    gain.gain.setValueAtTime(0.0001, start);
+    gain.gain.exponentialRampToValueAtTime(volume, start + 0.015);
+    gain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(start);
+    osc.stop(start + duration + 0.025);
+  }
+
+  function playNotificationSound(labels = [], force = false) {
+    if (!state.soundEnabled) return;
+    const now = Date.now();
+    if (!force && now - (state.lastSoundAt || 0) < 1800) return;
+    state.lastSoundAt = now;
+    const ctx = unlockNotificationSound();
+    if (!ctx) return;
+    const play = () => {
+      try {
+        let at = ctx.currentTime + 0.02;
+        soundPattern(labels).forEach((tone) => {
+          scheduleTone(ctx, tone.f, at, tone.d);
+          at += tone.d + (tone.gap || 0);
+        });
+      } catch (e) {}
+    };
+    try {
+      if (ctx.state === "suspended") {
+        ctx.resume().then(play).catch(() => {});
+      } else {
+        play();
+      }
+    } catch (e) {}
+  }
+
+  const clean = (t) => String(t || "")
+    .replace(/\u00a0/g, " ")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\r/g, "")
+    .trim();
+
+  const norm = (t) => clean(t).toLocaleLowerCase("tr-TR");
+
+  function uiDocument() {
+    try {
+      if (state.panelWindow && !state.panelWindow.closed && state.panelWindow.document?.body) {
+        return state.panelWindow.document;
+      }
+    } catch (e) {}
+    try {
+      if (window.top?.document?.body) return window.top.document;
+    } catch (e) {}
+    return document;
+  }
+
+  function uiWindow() {
+    return uiDocument().defaultView || window;
+  }
+
+  function uiEl(id) {
+    const doc = uiDocument();
+    return doc.getElementById(id) || document.getElementById(id);
+  }
+
+  function removeUiEl(id) {
+    const doc = uiDocument();
+    const topEl = doc.getElementById(id);
+    const localEl = document.getElementById(id);
+    topEl?.remove();
+    if (localEl && localEl !== topEl) localEl.remove();
+  }
+
+  function openPanelWindow() {
+    try {
+      if (state.panelWindow && !state.panelWindow.closed && state.panelWindow.document?.body) {
+        state.popupMode = true;
+        return state.panelWindow;
+      }
+
+      const win = window.open("", "acil_otoexport_panel");
+      if (!win) {
+        state.popupMode = false;
+        return null;
+      }
+
+      state.panelWindow = win;
+      state.popupMode = true;
+      win.document.open();
+      win.document.write(`<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <title>Vizit Sade</title>
+  <style>
+    html, body { margin:0; width:100%; height:100%; overflow:hidden; background:#f1f5f9; }
+    button, textarea { font-family:inherit; }
+  </style>
+</head>
+<body></body>
+</html>`);
+      win.document.close();
+      win.onbeforeunload = () => {
+        if (state.panelWindow === win) {
+          state.panelWindow = null;
+          state.popupMode = false;
+        }
+      };
+      return win;
+    } catch (e) {
+      state.popupMode = false;
+      return null;
+    }
+  }
+
+  function rowsAsArrays() {
+    return Array.from(document.querySelectorAll("tr"))
+      .map((tr) =>
+        Array.from(tr.querySelectorAll("td,th"))
+          .map((td) => clean(td.innerText || td.textContent || ""))
+          .filter(Boolean)
+      )
+      .filter((r) => r.length);
+  }
+
+  function patientKey(p) {
+    const nameRoom = [p.oda, p.adSoyad].map(clean).join("|");
+    if (clean(p.oda) && clean(p.adSoyad)) return nameRoom;
+    return [p.adSoyad, p.protokol, p.kimlikNo, p.birimSevkId, p.hastaGelisId, p.hastaId].map(clean).filter(Boolean).join("|");
+  }
+
+  function displayKey(p) {
+    return p.key || patientKey(p);
+  }
+
+  function roomSort(a, b) {
+    return String(a.oda || "").localeCompare(String(b.oda || ""), "tr", { numeric: true });
+  }
+
+  function saveSmartSettings() {
+    try {
+      localStorage.setItem("vizitSadeSortMode", state.sortMode);
+      localStorage.setItem("vizitSadePinnedKeys", JSON.stringify(state.pinnedKeys || []));
+      localStorage.setItem("vizitSadePausedKeys", JSON.stringify(state.pausedKeys || []));
+      localStorage.setItem("vizitSadeThresholds", JSON.stringify(state.thresholds || {}));
+      localStorage.setItem("vizitSadeCardWidth", String(state.cardWidth || 290));
+      localStorage.setItem("vizitSadeCardHeight", String(state.cardHeight || 320));
+      localStorage.setItem("vizitSadeReplacementNotes", JSON.stringify(state.replacementNotes || {}));
+      localStorage.setItem("vizitSadeReplacementDone", JSON.stringify(state.replacementDone || {}));
+    } catch (e) {}
+  }
+
+  function numberValue(v) {
+    const n = Number(String(v == null ? "" : v).replace(",", ".").match(/-?\d+(?:\.\d+)?/)?.[0]);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  function latestLabNumber(p, key) {
+    return numberValue(latestValue(p?.labs?.[key] || []));
+  }
+
+  function criticalAlerts(p) {
+    const v = (p.vitals || [])[0] || {};
+    const t = state.thresholds;
+    const out = [];
+    const temp = numberValue(v.temp), spo2 = numberValue(v.spo2), pulse = numberValue(v.pulse), sys = numberValue(v.sys);
+    const glu = latestLabNumber(p, "Glu"), potassium = latestLabNumber(p, "K"), hb = latestLabNumber(p, "Hb"), plt = latestLabNumber(p, "PLT");
+    if (temp != null && temp >= t.tempHigh) out.push(`Ateş ${temp}`);
+    if (spo2 != null && spo2 <= t.spo2Low) out.push(`SpO₂ ${spo2}`);
+    if (pulse != null && (pulse <= t.pulseLow || pulse >= t.pulseHigh)) out.push(`Nabız ${pulse}`);
+    if (sys != null && (sys <= t.sysLow || sys >= t.sysHigh)) out.push(`TA ${sys}`);
+    if (glu != null && (glu <= t.glucoseLow || glu >= t.glucoseHigh)) out.push(`Glu ${glu}`);
+    if (potassium != null && (potassium <= t.potassiumLow || potassium >= t.potassiumHigh)) out.push(`K ${potassium}`);
+    if (hb != null && hb < 7) out.push(`Hb ${hb}`);
+    if (plt != null && plt < 50) out.push(`PLT ${plt}`);
+    return out;
+  }
+
+  function priorityScore(p) {
+    return criticalAlerts(p).length * 100 + ((p.changedLabels || []).length ? 30 : 0) + (unseenRecentAnsweredConsults(p).length ? 20 : 0) + ((state.pinnedKeys || []).includes(displayKey(p)) ? 1000 : 0);
+  }
+
+  function sortPatientsForDisplay(list) {
+    const base = list.slice();
+    if (state.sortMode === "priority") return base.sort((a, b) => priorityScore(b) - priorityScore(a) || roomSort(a, b));
+    if (state.sortMode === "room") return base.sort(roomSort);
+    if (state.sortMode === "name") return base.sort((a, b) => String(a.adSoyad || "").localeCompare(String(b.adSoyad || ""), "tr"));
+    const fonetIndex = new Map((state.fonetOrder || []).map((key, index) => [key, index]));
+    if (state.sortMode === "fonet") return base.sort((a, b) => (fonetIndex.get(displayKey(a)) ?? 99999) - (fonetIndex.get(displayKey(b)) ?? 99999));
+    const orderIndex = new Map((state.cardOrder || []).map((key, index) => [key, index]));
+    const sorted = base.sort((a, b) => {
+      const ak = displayKey(a);
+      const bk = displayKey(b);
+      const ai = orderIndex.has(ak) ? orderIndex.get(ak) : Number.MAX_SAFE_INTEGER;
+      const bi = orderIndex.has(bk) ? orderIndex.get(bk) : Number.MAX_SAFE_INTEGER;
+      if (ai !== bi) return ai - bi;
+      return roomSort(a, b);
+    });
+    state.cardOrder = sorted.map(displayKey);
+    return sorted;
+  }
+
+  function movePatientCard(fromKey, toKey) {
+    if (!fromKey || !toKey || fromKey === toKey) return;
+    const order = (state.cardOrder?.length ? state.cardOrder.slice() : state.patients.map(displayKey));
+    state.patients.map(displayKey).forEach((key) => {
+      if (key && !order.includes(key)) order.push(key);
+    });
+    const from = order.indexOf(fromKey);
+    const to = order.indexOf(toKey);
+    if (from < 0 || to < 0) return;
+    const [item] = order.splice(from, 1);
+    order.splice(to, 0, item);
+    state.cardOrder = order;
+    state.patients = sortPatientsForDisplay(state.patients);
+    render();
+  }
+
+  function mergePatients(list) {
+    const incomingOrder = list.map((p) => patientKey(p)).filter(Boolean);
+    if (incomingOrder.length) state.fonetOrder = [...new Set(incomingOrder)];
+    const incomingKeys = new Set(incomingOrder);
+    const seenNow = Date.now();
+    const map = new Map();
+    state.patients.forEach((p) => {
+      if (!p || !p.adSoyad) return;
+      const key = patientKey(p) || p.adSoyad;
+      p.key = key;
+      map.set(key, p);
+    });
+    list.forEach((p) => {
+      if (!p || !p.adSoyad) return;
+      const key = patientKey(p) || p.adSoyad;
+      const old = map.get(key);
+      const merged = old || {};
+      const preserved = { ...merged };
+      Object.assign(merged, p, { key });
+      if (incomingKeys.has(key)) merged.seenInServiceAt = seenNow;
+      ["birimSevkId", "hastaGelisId", "hastaId", "protokol", "kimlikNo", "doktor", "birim", "yas", "cinsiyet", "tani", "alerji", "asa", "diyet", "diyetId", "uzmanlikKodu", "diyetAraOgun", "knownDiseases", "homeMeds", "plannedOperation", "postopPlace"].forEach((field) => {
+        if (!merged[field] && preserved[field]) merged[field] = preserved[field];
+      });
+      for (const field of ["labs", "glucoseChecks", "vitals", "consults", "orders", "nursing", "radiology", "surgeries", "anesthesia", "errors"]) {
+        if ((!p[field] || (Array.isArray(p[field]) && !p[field].length)) && preserved[field]) merged[field] = preserved[field];
+      }
+      if (!p.clinical && preserved.clinical) merged.clinical = preserved.clinical;
+      map.set(key, merged);
+    });
+    state.patients = sortPatientsForDisplay(Array.from(map.values()).filter((p) => incomingKeys.has(displayKey(p)) || seenNow - Number(p.seenInServiceAt || seenNow) < 300000));
+    return state.patients;
+  }
+
+  function collectPatientRowsFromDom() {
+    const unitRe = /cerrahi|yoğun bakım|pacu|kliniği|servisi|ortopedi|dahiliye|anestezi|yatak/i;
+
+    return rowsAsArrays()
+      .filter((r) => {
+        if (!/^\d+$/.test(r[0] || "")) return false;
+        if (!r[1] || r[1].length < 5) return false;
+        if (!/^\d{1,5}$/.test(r[2] || "")) return false;
+        return r.some((x) => unitRe.test(norm(x)));
+      })
+      .map((r) => {
+        let yas = "";
+        let doktor = "";
+        let birim = "";
+        let vaka = "";
+
+        if (/^\d{1,3}$/.test(r[3] || "") && r[4]) {
+          yas = r[3] || "";
+          doktor = r[4] || "";
+          birim = r[5] || "";
+          vaka = r[6] || "";
+        } else {
+          doktor = r[3] || "";
+          birim = r[4] || "";
+          vaka = r[5] || "";
+        }
+
+        return {
+          source: "DOM",
+          sira: r[0] || "",
+          adSoyad: r[1] || "",
+          oda: r[2] || "",
+          yas,
+          doktor,
+          birim,
+          vaka,
+          raw: r.join(" | ")
+        };
+      });
+  }
+
+  function getRecordValue(record, names) {
+    const readPath = (obj, path) => {
+      if (!obj || !path.includes(".")) return undefined;
+      return path.split(".").reduce((acc, key) => acc == null ? undefined : acc[key], obj);
+    };
+
+    for (const name of names) {
+      try {
+        if (record.get && record.get(name) != null) return record.get(name);
+      } catch (e) {}
+      try {
+        if (record.data && record.data[name] != null) return record.data[name];
+      } catch (e) {}
+      try {
+        const nested = readPath(record.data, name);
+        if (nested != null) return nested;
+      } catch (e) {}
+    }
+    return "";
+  }
+
+  function deepFind(obj, predicate, depth = 0) {
+    if (!obj || typeof obj !== "object" || depth > 5) return "";
+    try {
+      if (predicate(obj)) return obj.id || "";
+    } catch (e) {}
+    for (const value of Object.values(obj)) {
+      const found = deepFind(value, predicate, depth + 1);
+      if (found) return found;
+    }
+    return "";
+  }
+
+  function inferIdsFromData(data = {}) {
+    const birimSevkId =
+      data.birimSevk?.id ||
+      data.klinik?.birimSevk?.id ||
+      data.hastaBirimSevk?.id ||
+      deepFind(data, (x) => x.birim && x.hastaGelis && x.id);
+
+    const hastaGelisId =
+      data.hastaGelis?.id ||
+      data.birimSevk?.hastaGelis?.id ||
+      data.hastaBirimSevk?.hastaGelis?.id ||
+      deepFind(data, (x) => x.hasta && (x.kodu || x.muracaatTarihi) && x.id);
+
+    const hastaId =
+      data.hasta?.id ||
+      data.hastaGelis?.hasta?.id ||
+      data.birimSevk?.hastaGelis?.hasta?.id ||
+      data.hastaBirimSevk?.hastaGelis?.hasta?.id ||
+      deepFind(data, (x) => x.kimlik && x.id);
+
+    return { birimSevkId: clean(birimSevkId), hastaGelisId: clean(hastaGelisId), hastaId: clean(hastaId) };
+  }
+
+  function collectPatientRowsFromExt() {
+    const out = [];
+    if (!window.Ext?.ComponentQuery) return out;
+
+    const nameKeys = ["ADSOYAD", "AD_SOYAD", "HASTA_ADI_SOYADI", "HASTAADI", "HASTA_ADI", "ADI_SOYADI", "adiSoyadi", "adSoyad", "hastaAdiSoyadi"];
+    const firstKeys = ["ADI", "HASTA_ADI", "ad", "adi"];
+    const lastKeys = ["SOYADI", "HASTA_SOYADI", "soyad", "soyadi"];
+    const roomKeys = ["ODA", "ODA_NO", "ODANO", "YATAK_NO", "YATAKNO", "odaNo", "yatakNo"];
+    const doctorKeys = ["DOKTOR", "DOKTOR_ADI", "SORUMLU_DOKTOR", "doktor", "doktorAdi"];
+    const unitKeys = ["BIRIM", "BİRİM", "YATAK_BIRIMI", "SERVIS", "SERVİS", "KLİNİK", "KLINIK", "birim", "servis"];
+    const protocolKeys = ["PROTOKOL", "PROTOKOL_NO", "ISLEMNO", "ISLEM_NO", "GELIS_NO", "protokolNo", "islemNo"];
+    const idKeys = ["KIMLIK_NO", "TC_KIMLIK_NO", "TCKIMLIKNO", "HASTA_KIMLIK_NO", "kimlikNo", "tcKimlikNo"];
+    const ageKeys = ["YAS", "YAŞ", "HASTA_YASI", "yas"];
+    const dietKeys = ["DIYET", "DİYET", "DIYET_ADI", "DİYET_ADI", "DIYETADI", "DİYETADI", "diyet", "diyetAdi", "diyet.adi", "sabahDiyetMenu.adi", "ogleDiyetMenu.adi", "aksamDiyetMenu.adi"];
+    const dietIdKeys = ["DIYET_ID", "DİYET_ID", "DIYETID", "DİYETID", "diyetId", "diyet.id", "sabahDiyetMenu.id", "ogleDiyetMenu.id", "aksamDiyetMenu.id"];
+    const specialtyKeys = ["UZMANLIK_KODU", "UZMANLIKKODU", "BRANS_KODU", "BRANŞ_KODU", "uzmanlikKodu", "birim.uzmanlikKodu", "birimSevk.birim.uzmanlikKodu", "birimSevk.personel.uzmanlik.kodu"];
+    const birimSevkKeys = ["BIRIM_SEVK_ID", "BIRIMSEVKID", "HASTA_BIRIM_SEVK_ID", "HASTABIRIMSEVKID", "birimSevkId", "hastaBirimSevkId", "birimSevk.id", "klinik.birimSevk.id", "id"];
+    const hastaGelisKeys = ["HASTA_GELIS_ID", "HASTAGELISID", "GELIS_ID", "hastaGelisId", "hastaGelis.id", "birimSevk.hastaGelis.id"];
+    const hastaIdKeys = ["HASTA_ID", "HASTAID", "hastaId", "hasta.id", "hastaGelis.hasta.id", "birimSevk.hastaGelis.hasta.id"];
+
+    try {
+      Ext.ComponentQuery.query("gridpanel, grid").forEach((grid) => {
+        let store = null;
+        try { store = grid.getStore?.(); } catch (e) {}
+        if (!store) return;
+
+        const records = [];
+        try {
+          store.each?.((rec) => records.push(rec));
+        } catch (e) {}
+        try {
+          if (!records.length && store.data?.items) records.push(...store.data.items);
+        } catch (e) {}
+
+        records.forEach((record) => {
+          const data = record.data || {};
+          const inferred = inferIdsFromData(data);
+          let adSoyad = clean(getRecordValue(record, nameKeys));
+          const first = clean(getRecordValue(record, firstKeys));
+          const last = clean(getRecordValue(record, lastKeys));
+          if (!adSoyad && (first || last)) adSoyad = [first, last].filter(Boolean).join(" ");
+
+          const oda = clean(getRecordValue(record, roomKeys));
+          const birim = clean(getRecordValue(record, unitKeys));
+
+          if (!adSoyad || adSoyad.length < 5) return;
+          if (!oda && !/cerrahi|yoğun|servis|klinik|yatak/i.test(birim)) return;
+
+          out.push({
+            source: "ExtJS",
+            adSoyad,
+            oda,
+            yas: clean(getRecordValue(record, ageKeys)),
+            doktor: clean(getRecordValue(record, doctorKeys)),
+            birim,
+            protokol: clean(getRecordValue(record, protocolKeys)),
+            kimlikNo: clean(getRecordValue(record, idKeys)),
+            diyet: clean(getRecordValue(record, dietKeys)),
+            diyetId: clean(getRecordValue(record, dietIdKeys)),
+            uzmanlikKodu: clean(getRecordValue(record, specialtyKeys)),
+            birimSevkId: clean(getRecordValue(record, birimSevkKeys)) || inferred.birimSevkId,
+            hastaGelisId: clean(getRecordValue(record, hastaGelisKeys)) || inferred.hastaGelisId,
+            hastaId: clean(getRecordValue(record, hastaIdKeys)) || inferred.hastaId,
+            labs: [],
+            vitals: [],
+            consults: [],
+            orders: [],
+            nursing: [],
+            radiology: [],
+            clinical: "",
+            errors: [],
+            raw: JSON.stringify(data).slice(0, 1200)
+          });
+        });
+      });
+    } catch (e) {}
+
+    return out;
+  }
+
+  function collectServicePatients(shouldRender = true) {
+    const dom = collectPatientRowsFromDom();
+    const ext = collectPatientRowsFromExt();
+    mergePatients([...dom, ...ext]);
+    state.lastMessage = `${state.patients.length} servis hastası toplandı.`;
+    if (shouldRender) render();
+    return state.patients;
+  }
+
+  function inferEndpointType(url, body, responseText) {
+    const hay = `${url} ${body} ${responseText}`.toLocaleLowerCase("tr-TR");
+    if (/anestezi|preoperatif|preop|asa skoru|anestezi.+muayene/.test(hay)) return "patient";
+    if (/hasta|patient|yatis|yatış|protokol|kimlik|servis|klinik/.test(hay)) return "patient";
+    if (/laboratuvar|lab|tetkik|sonuc|sonuç|hemogram|biyokimya|wbc|hgb|crp/.test(hay)) return "lab";
+    if (/vital|tansiyon|nabız|nabiz|ateş|ates|solunum|spo2|ölçüm|olcum/.test(hay)) return "vital";
+    if (/kons|konsult|konsült|istem|sonuç açıklama|sonucaciklama/.test(hay)) return "consult";
+    if (/order|eorder|tedavi|ilaç|ilac|sarf|doz/.test(hay)) return "order";
+    if (/hemşire|hemsire|devir|bakım|bakim|nöbet|nobet/.test(hay)) return "nursing";
+    return "other";
+  }
+
+  function applyPatientDetailResponse(url, responseText) {
+    if (!/\/Klinik\/Klinik\/getKayit\//i.test(url || "")) return false;
+    if (!/diyet|DiyetMenu|Diyet/i.test(responseText || "")) return false;
+
+    try {
+      const match = String(url || "").match(/\/Klinik\/Klinik\/getKayit\/(\d+)/i);
+      const tmp = { birimSevkId: clean(match?.[1] || "") };
+      parseKlinikDetail(JSON.parse(responseText), tmp);
+      if (!tmp.diyet && !tmp.diyetId) return false;
+
+      const target = state.patients.find((p) =>
+        (tmp.birimSevkId && clean(p.birimSevkId) === clean(tmp.birimSevkId)) ||
+        (tmp.hastaGelisId && clean(p.hastaGelisId) === clean(tmp.hastaGelisId)) ||
+        (tmp.hastaId && clean(p.hastaId) === clean(tmp.hastaId))
+      );
+
+      if (target) {
+        const before = JSON.stringify(patientSnapshot(target));
+        ["diyet", "diyetId", "uzmanlikKodu", "diyetAraOgun", "yatis", "tani", "clinical", "hastaGelisId", "hastaId", "birimSevkId"].forEach((field) => {
+          if (tmp[field]) target[field] = tmp[field];
+        });
+        target.updatedAt = new Date().toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" });
+        if (before !== JSON.stringify(patientSnapshot(target))) {
+          const labels = [];
+          if (tmp.diyet || tmp.diyetAraOgun) labels.push("Diyet güncellendi");
+          if (tmp.clinical) labels.push("Klinik izlem");
+          if (tmp.tani || tmp.yatis) labels.push("Hasta bilgisi");
+          target.changedAt = Date.now();
+          target.changedLabels = [...new Set([...(target.changedLabels || []), ...(labels.length ? labels : ["Hasta bilgisi"])])];
+          target.changedText = target.changedLabels.slice(0, 4).join(", ");
+          target.changedDetail = labels.length
+            ? changeDetailText(labels, {}, patientSnapshot(target), target)
+            : "Hasta bilgileri güncellendi.";
+          target.lastChangeText = (labels.length ? labels : ["Hasta bilgisi"]).join(", ");
+          target.lastChangeDetail = target.changedDetail;
+          recordDesktopNotification(target, labels.length ? labels : ["Hasta bilgisi"], target.changedDetail);
+          playNotificationSound(labels.length ? labels : ["Hasta bilgisi"]);
+        }
+        return true;
+      }
+
+      if (tmp.adSoyad) {
+        mergePatients([tmp]);
+        return true;
+      }
+    } catch (e) {}
+    return false;
+  }
+
+  function applyRadiologyReportResponse(url, responseText) {
+    if (!/\/Ris\/RisHizmetSonuc\/getRisRaporSonucByRaporId\//i.test(url || "")) return false;
+    const reportId = clean(String(url || "").match(/getRisRaporSonucByRaporId\/(\d+)/i)?.[1] || "");
+    if (!reportId) return false;
+
+    try {
+      const data = JSON.parse(responseText);
+      const text = radiologyReportText(data);
+      if (!text) return false;
+
+      const patient = state.patients.find((p) => (p.radiology || []).some((r) => clean(r.reportId) === reportId));
+      if (!patient) return false;
+
+      const rad = (patient.radiology || []).find((r) => clean(r.reportId) === reportId);
+      if (!rad) return false;
+      const before = rad.reportText || "";
+      rad.reportText = text;
+      rad.reportDate = data?.data?.onayTarihi || data?.data?.eklemeTarihi || rad.reportDate || "";
+      state.radiologyTextCache[reportId] = text;
+      patient.updatedAt = new Date().toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" });
+      if (before !== text) {
+        patient.changedAt = Date.now();
+        patient.changedLabels = [...new Set([...(patient.changedLabels || []), "Yeni radyoloji"])];
+        patient.changedText = patient.changedLabels.slice(0, 4).join(", ");
+        patient.changedDetail = `Radyoloji: ${clip(text, 520)}`;
+        patient.lastChangeText = "Yeni radyoloji";
+        patient.lastChangeDetail = patient.changedDetail;
+        recordDesktopNotification(patient, ["Yeni radyoloji"], patient.changedDetail);
+        playNotificationSound(["Yeni radyoloji"]);
+      }
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function applyAnesthesiaFormResponse(url, responseText) {
+    const sample = String(responseText || "").slice(0, 20000);
+    if (!/anestezi|preoperatif|preop|\basa\b|planlanan ameliyat|kullandığı ilaç|kullandigi ilac|bilinen hastalık|bilinen hastalik/i.test(`${url || ""} ${sample}`)) return false;
+
+    try {
+      const data = JSON.parse(responseText);
+      const info = extractAnesthesiaInfo(data);
+      if (!info || !["asa", "knownDiseases", "homeMeds", "plannedOperation", "destination"].some((field) => info[field])) return false;
+
+      const patient = findPatientForAnesthesiaData(data, info);
+      if (!patient) {
+        state.lastMessage = "Anestezi formu yakalandı, hasta eşleşmesi bulunamadı.";
+        return true;
+      }
+
+      const before = stableJson(patientSnapshot(patient));
+      applyAnesthesiaInfo(patient, info);
+      patient.updatedAt = new Date().toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" });
+
+      if (before !== stableJson(patientSnapshot(patient))) {
+        patient.changedAt = Date.now();
+        patient.changedLabels = [...new Set([...(patient.changedLabels || []), "Anestezi formu"])];
+        patient.changedText = patient.changedLabels.slice(0, 4).join(", ");
+        patient.changedDetail = changeDetailText(["Anestezi formu"], {}, patientSnapshot(patient), patient);
+        patient.lastChangeText = "Anestezi formu";
+        patient.lastChangeDetail = patient.changedDetail;
+        recordDesktopNotification(patient, ["Anestezi formu"], patient.changedDetail);
+        playNotificationSound(["Anestezi formu"]);
+      }
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function scheduleRender(delay = 150) {
+    if (!state.active || state.renderTimer) return;
+    state.renderTimer = window.setTimeout(() => {
+      state.renderTimer = null;
+      if (state.active) render();
+    }, delay);
+  }
+
+  function addRequest(req) {
+    const responseText = String(req.responseText || "");
+    const type = inferEndpointType(req.url, req.body, responseText);
+    const appliedPatientDetail = applyPatientDetailResponse(req.url, responseText);
+    const appliedRadiologyReport = applyRadiologyReportResponse(req.url, responseText);
+    const appliedAnesthesia = applyAnesthesiaFormResponse(req.url, responseText);
+    state.requests.unshift({ ...req, responseText: responseText.slice(0, 1000), type, at: new Date().toLocaleTimeString("tr-TR") });
+    state.requests = state.requests.slice(0, 200);
+    if (type === "patient") collectServicePatients(false);
+    if (!state.busy) scheduleRender(appliedPatientDetail || appliedRadiologyReport || appliedAnesthesia ? 50 : 200);
+  }
+
+  function patchNetwork() {
+    if (!state.original.xhrOpen && window.XMLHttpRequest) {
+      state.original.xhrOpen = XMLHttpRequest.prototype.open;
+      state.original.xhrSend = XMLHttpRequest.prototype.send;
+
+      XMLHttpRequest.prototype.open = function(method, url) {
+        this.__fsp = { method, url, started: performance.now(), body: "" };
+        return state.original.xhrOpen.apply(this, arguments);
+      };
+
+      XMLHttpRequest.prototype.send = function(body) {
+        const meta = this.__fsp || {};
+        meta.body = typeof body === "string" ? body : "";
+        this.addEventListener("loadend", () => {
+          let text = "";
+          try { text = String(this.responseText || ""); } catch (e) {}
+          addRequest({
+            source: "xhr",
+            method: meta.method || "GET",
+            url: meta.url || "",
+            body: meta.body || "",
+            status: this.status,
+            responseText: text
+          });
+        });
+        return state.original.xhrSend.apply(this, arguments);
+      };
+    }
+
+    if (!state.original.extRequest && window.Ext?.Ajax?.request) {
+      state.original.extRequest = Ext.Ajax.request;
+      Ext.Ajax.request = function(options = {}) {
+        const userSuccess = options.success;
+        const userFailure = options.failure;
+        const url = options.url || "";
+        const method = options.method || "GET";
+        const body = JSON.stringify(options.params || options.jsonData || {});
+
+        options.success = function(response) {
+          addRequest({
+            source: "Ext.Ajax",
+            method,
+            url,
+            body,
+            status: response?.status || "",
+            responseText: String(response?.responseText || "")
+          });
+          return userSuccess?.apply(this, arguments);
+        };
+
+        options.failure = function(response) {
+          addRequest({
+            source: "Ext.Ajax",
+            method,
+            url,
+            body,
+            status: response?.status || "ERR",
+            responseText: String(response?.responseText || "")
+          });
+          return userFailure?.apply(this, arguments);
+        };
+
+        return state.original.extRequest.call(this, options);
+      };
+    }
+  }
+
+  function baseUrl() {
+    const win = (() => {
+      try {
+        if (window.opener && !window.opener.closed && /^https?:/i.test(window.opener.location.origin)) return window.opener;
+      } catch (e) {}
+      return window;
+    })();
+    const origin = /^https?:/i.test(win.location.origin || "") ? win.location.origin : "http://hbys.bursa.yerel";
+    return `${origin}/hbys-rs/hbys`;
+  }
+
+  function filterParam(items) {
+    return encodeURIComponent(JSON.stringify(items));
+  }
+
+  async function apiJson(path, params = {}) {
+    const query = new URLSearchParams({ _dc: Date.now() });
+    Object.entries(params).forEach(([key, value]) => {
+      if (Array.isArray(value)) value.forEach((item) => query.append(key, item));
+      else if (value != null) query.set(key, value);
+    });
+    const url = `${baseUrl()}${path}${path.includes("?") ? "&" : "?"}${query.toString()}`;
+    const fetchFn = (() => {
+      try {
+        if (window.opener && !window.opener.closed && window.opener.fetch) return window.opener.fetch.bind(window.opener);
+      } catch (e) {}
+      return fetch.bind(window);
+    })();
+    const res = await fetchFn(url, {
+      credentials: "include",
+      headers: { "Accept": "application/json, text/plain, */*" }
+    });
+    const text = await res.text();
+    if (!res.ok) throw new Error(`${res.status} ${text.slice(0, 120)}`);
+    try {
+      return JSON.parse(text);
+    } catch (e) {
+      throw new Error(`JSON okunamadı: ${text.slice(0, 120)}`);
+    }
+  }
+
+  async function apiJsonBody(path, method, payload = {}) {
+    const url = `${baseUrl()}${path}`;
+    try {
+      const fonetWin = (window.opener && !window.opener.closed && /hbys/i.test(window.opener.location.href)) ? window.opener : window;
+      if (fonetWin.Ext?.Ajax?.request) {
+        return new Promise((resolve, reject) => {
+          fonetWin.Ext.Ajax.request.call(fonetWin.Ext.Ajax, {
+            url,
+            method,
+            jsonData: JSON.stringify(payload),
+            success: (response) => {
+              try {
+                const text = response?.responseText || "";
+                const json = text ? JSON.parse(text) : response;
+                if (json?.success === false) reject(new Error(json.message || json.msg || text.slice(0, 220)));
+                else resolve(json);
+              } catch (e) {
+                resolve(response);
+              }
+            },
+            failure: (response) => reject(new Error(`${response?.status || "ERR"} ${String(response?.responseText || response?.statusText || "").slice(0, 220)}`))
+          });
+        });
+      }
+    } catch (e) {}
+    if (false) return new Promise((resolve, reject) => {
+      try {
+        const xhr = new XMLHttpRequest();
+        xhr.open(method, url, true);
+        xhr.withCredentials = true;
+        xhr.setRequestHeader("Accept", "application/json, text/plain, */*");
+        xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
+        xhr.setRequestHeader("X-Requested-With", "XMLHttpRequest");
+        xhr.onreadystatechange = () => {
+          if (xhr.readyState !== 4) return;
+          const text = xhr.responseText || "";
+          if (xhr.status < 200 || xhr.status >= 300) {
+            reject(new Error(`${xhr.status || "ERR"} ${text.slice(0, 220)}`));
+            return;
+          }
+          try {
+            const json = text ? JSON.parse(text) : {};
+            if (json?.success === false) {
+              reject(new Error(json.message || json.msg || text.slice(0, 220) || "FONET başarısız döndü"));
+            } else {
+              resolve(json);
+            }
+          } catch (e) {
+            resolve({ text });
+          }
+        };
+        xhr.onerror = () => reject(new Error("XHR gönderimi başarısız"));
+        xhr.send(JSON.stringify(payload));
+      } catch (e) {
+        reject(e);
+      }
+    });
+    const ext = (() => {
+      try {
+        if (window.opener && !window.opener.closed && window.opener.Ext?.Ajax?.request) return window.opener.Ext.Ajax;
+      } catch (e) {}
+      try {
+        if (window.Ext?.Ajax?.request) return window.Ext.Ajax;
+      } catch (e) {}
+      return null;
+    })();
+    if (ext) {
+      return new Promise((resolve, reject) => {
+        ext.request({
+          url,
+          method,
+          jsonData: JSON.stringify(payload),
+          success: (response) => {
+            try {
+              resolve(response?.responseText ? JSON.parse(response.responseText) : response);
+            } catch (e) {
+              resolve(response);
+            }
+          },
+          failure: (response) => reject(new Error(`${response?.status || "ERR"} ${String(response?.responseText || response?.statusText || "").slice(0, 160)}`))
+        });
+      });
+    }
+    const fetchFn = (() => {
+      try {
+        if (window.opener && !window.opener.closed && window.opener.fetch) return window.opener.fetch.bind(window.opener);
+      } catch (e) {}
+      return fetch.bind(window);
+    })();
+    const res = await fetchFn(url, {
+      method,
+      credentials: "include",
+      headers: {
+        "Accept": "application/json, text/plain, */*",
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(payload)
+    });
+    const text = await res.text();
+    if (!res.ok) throw new Error(`${res.status} ${text.slice(0, 160)}`);
+    if (!text) return {};
+    try {
+      return JSON.parse(text);
+    } catch (e) {
+      return { text };
+    }
+  }
+
+  function safeDateParts(date) {
+    const raw = String(date == null ? "" : date).trim();
+    let m = raw.match(/(\d{1,2})[./-](\d{1,2})[./-](\d{4})(?:[T\s]+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
+    if (m) return { day:Number(m[1]), month:Number(m[2]), year:Number(m[3]), hour:Number(m[4] || 0), minute:Number(m[5] || 0), second:Number(m[6] || 0) };
+    m = raw.match(/(\d{4})-(\d{1,2})-(\d{1,2})(?:[T\s]+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
+    if (m) return { day:Number(m[3]), month:Number(m[2]), year:Number(m[1]), hour:Number(m[4] || 0), minute:Number(m[5] || 0), second:Number(m[6] || 0) };
+    const epoch = raw.match(/\/Date\((\d{10,13})/i)?.[1] || (/^\d{10,13}$/.test(raw) ? raw : "");
+    if (epoch) {
+      const n = Number(epoch) * (epoch.length === 10 ? 1000 : 1);
+      const d = new Date(n);
+      if (!Number.isNaN(d.getTime())) return { day:d.getDate(), month:d.getMonth()+1, year:d.getFullYear(), hour:d.getHours(), minute:d.getMinutes(), second:d.getSeconds() };
+    }
+    return null;
+  }
+
+  function shortDate(date) {
+    const p = safeDateParts(date);
+    return p ? `${String(p.day).padStart(2,"0")}.${String(p.month).padStart(2,"0")}` : "";
+  }
+
+  function shortTime(date) {
+    const m = String(date || "").match(/\b(\d{2}:\d{2})/);
+    return m ? m[1] : "";
+  }
+
+  function dateTimeKey(date) {
+    const p = safeDateParts(date);
+    return p ? [p.year,p.month,p.day,p.hour,p.minute,p.second].map((x,i) => String(x).padStart(i ? 2 : 4,"0")).join("") : "";
+  }
+
+  function parseTrDate(date) {
+    const p = safeDateParts(date);
+    return p ? new Date(p.year, p.month - 1, p.day, p.hour, p.minute, p.second).getTime() : 0;
+  }
+
+  function cleanMultiline(text) {
+    return String(text || "")
+      .replace(/\u00a0/g, " ")
+      .replace(/\r/g, "")
+      .split("\n")
+      .map((x) => clean(x))
+      .filter(Boolean)
+      .join("\n")
+      .trim();
+  }
+
+  function stableJson(value) {
+    const normalize = (item) => {
+      if (Array.isArray(item)) {
+        return item
+          .map(normalize)
+          .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b), "tr"));
+      }
+      if (!item || typeof item !== "object") return item;
+      return Object.keys(item).sort().reduce((out, key) => {
+        out[key] = normalize(item[key]);
+        return out;
+      }, {});
+    };
+    return JSON.stringify(normalize(value));
+  }
+
+  function normalizeEventText(value) {
+    return cleanMultiline(value).toLocaleLowerCase("tr-TR").replace(/\s+/g, " ").trim();
+  }
+
+  function stableEventId(...parts) {
+    const text = parts.map(normalizeEventText).join("|");
+    let hash = 2166136261;
+    for (let i = 0; i < text.length; i++) {
+      hash ^= text.charCodeAt(i);
+      hash = Math.imul(hash, 16777619);
+    }
+    return `n${(hash >>> 0).toString(16).padStart(8, "0")}`;
+  }
+
+  function persistDesktopNotifications() {
+    try {
+      localStorage.setItem("vizitSadeNotifications", JSON.stringify(state.notificationLog.slice(0, 160)));
+      const seenEntries = Object.entries(state.notificationSeen || {})
+        .sort((a, b) => Number(b[1] || 0) - Number(a[1] || 0))
+        .slice(0, 600);
+      state.notificationSeen = Object.fromEntries(seenEntries);
+      localStorage.setItem("vizitSadeNotificationSeen", JSON.stringify(state.notificationSeen));
+    } catch (e) {}
+  }
+
+  function notificationKind(labels = []) {
+    const text = norm(labels.join(" "));
+    if (/kons/.test(text)) return "consult";
+    if (/glukoz|glukotest|glukometre/.test(text)) return "glucose";
+    if (/vital|tansiyon|nabız|ates|ateş|spo2/.test(text)) return "vital";
+    if (/lab|kan/.test(text)) return "lab";
+    if (/radyoloji|görüntü|rapor/.test(text)) return "radiology";
+    if (/order|ilaç|ilac/.test(text)) return "order";
+    if (/devir|hemşire|hemsire/.test(text)) return "nursing";
+    if (/diyet/.test(text)) return "diet";
+    if (/anestezi|asa|bh|ki|go|yer/.test(text)) return "anesthesia";
+    if (/yatış|yatis/.test(text)) return "admission";
+    return "other";
+  }
+
+  function notificationStyle(kind) {
+    const styles = {
+      consult: { color: "#9333ea", soft: "#faf5ff", title: "Konsültasyon" },
+      glucose: { color: "#d97706", soft: "#fffbeb", title: "Yeni glukoz" },
+      vital: { color: "#0891b2", soft: "#ecfeff", title: "Yeni vital" },
+      lab: { color: "#dc2626", soft: "#fef2f2", title: "Yeni lab" },
+      radiology: { color: "#2563eb", soft: "#eff6ff", title: "Radyoloji" },
+      order: { color: "#16a34a", soft: "#f0fdf4", title: "Yeni order" },
+      nursing: { color: "#0f766e", soft: "#f0fdfa", title: "Hemşire / devir" },
+      diet: { color: "#ca8a04", soft: "#fefce8", title: "Diyet" },
+      anesthesia: { color: "#7c3aed", soft: "#f5f3ff", title: "Anestezi formu" },
+      admission: { color: "#dc2626", soft: "#fff1f2", title: "Yatış / yer" },
+      other: { color: "#475569", soft: "#f8fafc", title: "Güncelleme" }
+    };
+    return styles[kind] || styles.other;
+  }
+
+  function recordDesktopNotification(p, labels = [], detail = "") {
+    const summary = [...new Set(labels.map(clean).filter(Boolean))].join(", ");
+    const body = cleanMultiline(detail);
+    if (!summary && !body) return null;
+    const key = displayKey(p);
+    const kind = notificationKind(labels);
+    const id = stableEventId(key, kind, summary, body);
+    if (state.notificationSeen[id]) return null;
+    const now = Date.now();
+    const recent = state.notificationLog.find((x) =>
+      x?.key === key &&
+      x.kind === kind &&
+      !x.read &&
+      now - Number(x.at || 0) < 120000
+    );
+    if (recent) {
+      const mergedSummary = [...new Set([
+        ...String(recent.summary || "").split(",").map(clean).filter(Boolean),
+        ...summary.split(",").map(clean).filter(Boolean)
+      ])].slice(0, 6).join(", ");
+      recent.summary = mergedSummary || recent.summary || summary || notificationStyle(kind).title;
+      recent.detail = compactNotificationDetail([recent.detail, body].filter(Boolean).join("\n\n"));
+      recent.at = now;
+      recent.count = Number(recent.count || 1) + 1;
+      recent.read = false;
+      state.notificationSeen[id] = now;
+      state.notificationLog = [recent, ...state.notificationLog.filter((x) => x?.id !== recent.id)].slice(0, 160);
+      persistDesktopNotifications();
+      return recent;
+    }
+
+    const item = {
+      id,
+      key,
+      oda: clean(p.oda),
+      adSoyad: clean(p.adSoyad),
+      kind,
+      title: notificationStyle(kind).title,
+      summary: summary || notificationStyle(kind).title,
+      detail: compactNotificationDetail(body),
+      at: now,
+      read: false,
+      count: 1
+    };
+    state.notificationSeen[id] = item.at;
+    state.notificationLog = [item, ...state.notificationLog.filter((x) => x?.id !== id)].slice(0, 160);
+    persistDesktopNotifications();
+    return item;
+  }
+
+  function compactNotificationDetail(text) {
+    const lines = cleanMultiline(text)
+      .split("\n")
+      .map(clean)
+      .filter(Boolean);
+    const unique = [];
+    lines.forEach((line) => {
+      const normalized = normalizeEventText(line);
+      if (!normalized || unique.some((x) => normalizeEventText(x) === normalized)) return;
+      unique.push(line);
+    });
+    return unique.slice(0, 14).join("\n");
+  }
+
+  function unreadNotificationCount() {
+    return state.notificationLog.filter((item) => item && !item.read).length;
+  }
+
+  function markNotificationRead(id) {
+    const item = state.notificationLog.find((x) => x?.id === id);
+    if (item) item.read = true;
+    persistDesktopNotifications();
+  }
+
+  function markPatientNotificationsRead(key) {
+    let changed = false;
+    state.notificationLog.forEach((item) => {
+      if (item?.key === key && !item.read) {
+        item.read = true;
+        changed = true;
+      }
+    });
+    if (changed) persistDesktopNotifications();
+  }
+
+  function markAllNotificationsRead() {
+    state.notificationLog.forEach((item) => { if (item) item.read = true; });
+    persistDesktopNotifications();
+  }
+
+  function deleteDesktopNotification(id) {
+    state.notificationLog = state.notificationLog.filter((item) => item?.id !== id);
+    persistDesktopNotifications();
+  }
+
+  function clearDesktopNotifications() {
+    state.notificationLog = [];
+    persistDesktopNotifications();
+  }
+
+  function patientMatchesSearch(p, query = state.searchText) {
+    const q = searchNorm(query);
+    if (!q) return true;
+    return searchNorm([
+      p.adSoyad,
+      p.oda,
+      p.doktor,
+      p.birim,
+      p.tani,
+      p.clinical,
+      p.diyet
+    ].filter(Boolean).join(" ")).includes(q);
+  }
+
+  function patientHasNewOrder(p) {
+    const key = displayKey(p);
+    return (p.changedLabels || []).some((label) => /order/i.test(label)) ||
+      (state.notificationLog || []).some((item) => !item?.read && item?.key === key && /order/i.test(item?.label || item?.text || ""));
+  }
+
+  function patientPendingConsults(p) {
+    return (p.consults || []).filter((item) => !consultIsAnswered(item)).length;
+  }
+
+  function patientHasCriticalLab(p) {
+    const number = (key) => numberValue(latestValue(p?.labs?.[key] || []));
+    const hb = number("Hb"), plt = number("PLT"), crp = number("CRP"), pct = number("PCT");
+    const na = number("Na"), k = number("K"), kre = number("Kre"), glu = number("Glu");
+    return (hb != null && hb < 8) || (plt != null && plt < 50) || (crp != null && crp > 100) ||
+      (pct != null && pct > 2) || (na != null && (na < 125 || na > 155)) ||
+      (k != null && (k < 3 || k > 6)) || (kre != null && kre > 2) || (glu != null && (glu < 60 || glu > 300));
+  }
+
+  function patientMatchesUiFilters(p) {
+    const filters = state.uiFilters || {};
+    if (filters.clinic && norm(p.birim || p.servis || p.klinik) !== norm(filters.clinic)) return false;
+    if (filters.critical && !criticalAlerts(p).length) return false;
+    if (filters.order && !patientHasNewOrder(p)) return false;
+    if (filters.consult && !patientPendingConsults(p)) return false;
+    if (filters.lab && !patientHasCriticalLab(p)) return false;
+    if (filters.postop && !/^POSTOP/i.test(clean(operationBadge(p)))) return false;
+    return true;
+  }
+
+  function serviceSummary() {
+    const patients = state.patients || [];
+    const readiness = typeof aoeReadiness === "function" ? aoeReadiness() : { processed:state.metrics?.processed || 0, total:patients.length, failures:0 };
+    return {
+      total:patients.length,
+      critical:patients.filter((p) => criticalAlerts(p).length).length,
+      orders:patients.filter(patientHasNewOrder).length,
+      consults:patients.reduce((sum, p) => sum + patientPendingConsults(p), 0),
+      labs:patients.filter(patientHasCriticalLab).length,
+      scanned:Number(readiness.processed || 0),
+      scanTotal:Number(readiness.total || patients.length),
+      errors:Number(readiness.failures || 0) + patients.reduce((sum, p) => sum + (p.errors?.length || 0), 0)
+    };
+  }
+
+  function serviceSummaryHtml() {
+    const s = serviceSummary();
+    const item = (icon, label, value, color) => `<span class="vs-summary-item" style="border-color:${color};"><b style="color:${color};">${icon} ${escapeHtml(label)}</b><strong>${escapeHtml(value)}</strong></span>`;
+    return [
+      item("●", "Hasta", s.total, "#2563eb"), item("!", "Kritik", s.critical, "#dc2626"),
+      item("Rx", "Yeni order", s.orders, "#d97706"), item("K", "Bekleyen kons", s.consults, "#d97706"),
+      item("L", "Kritik lab", s.labs, "#dc2626"), item("✓", "Tarama", `${s.scanned}/${s.scanTotal}`, "#15803d"),
+      item("×", "Eksik/hata", s.errors, s.errors ? "#dc2626" : "#64748b")
+    ].join("");
+  }
+
+  function htmlToText(raw) {
+    const text = String(raw || "");
+    if (!/<[^>]+>/.test(text)) return cleanMultiline(text);
+    try {
+      const doc = new DOMParser().parseFromString(text, "text/html");
+      Array.from(doc.querySelectorAll("img,script,style")).forEach((x) => x.remove());
+      return cleanMultiline(doc.body.innerText || doc.body.textContent || "");
+    } catch (e) {
+      return cleanMultiline(text.replace(/<[^>]+>/g, " "));
+    }
+  }
+
+  function cleanReportText(text) {
+    return cleanMultiline(text)
+      .replace(/Bu raporun elektronik imzalı kopyasını[\s\S]*$/i, "")
+      .replace(/https?:\/\/\S+/g, "")
+      .replace(/Rad\.?\s*Uzm\.?\s*Dr[\s\S]*$/i, "")
+      .replace(/İmza:[\s\S]*$/i, "")
+      .trim();
+  }
+
+  function usableRadiologyText(text) {
+    const value = cleanReportText(text);
+    if (!value) return "";
+    if (/^(aktif|pasif|kesin rapor|rapor var|onaylandı|onaylandi|taslak|bekliyor)$/i.test(value)) return "";
+    if (value.length < 4) return "";
+    return value;
+  }
+
+  function extractBoldRadiologyText(raw) {
+    const html = String(raw || "");
+    if (!/<[^>]+>/.test(html)) return "";
+
+    try {
+      const doc = new DOMParser().parseFromString(html, "text/html");
+      Array.from(doc.querySelectorAll("img,script,style")).forEach((x) => x.remove());
+
+      const nodes = Array.from(doc.body.querySelectorAll("*"))
+        .filter((el) => {
+          if (el.tagName === "STRONG" || el.tagName === "B") return true;
+          const style = String(el.getAttribute("style") || "");
+          return /font-weight\s*:\s*(bold|[6-9]00)/i.test(style);
+        });
+
+      const lines = nodes
+        .map((x) => cleanMultiline(x.innerText || x.textContent || ""))
+        .flatMap((x) => x.split("\n"))
+        .map(clean)
+        .filter(Boolean)
+        .filter((x) => {
+          if (/^Tarih\s*:/i.test(x)) return false;
+          if (/^ID\s*:/i.test(x)) return false;
+          if (/^Modality\s*:/i.test(x)) return false;
+          if (/^Hasta Adı\s*:/i.test(x)) return false;
+          if (/^SAYIN MESLEKTAŞIM/i.test(x)) return false;
+          if (/^Değerlendirme\s*:/i.test(x)) return false;
+          if (/^İmza/i.test(x)) return false;
+          if (/^Dip\.?\s*No/i.test(x)) return false;
+          if (/^Tescil/i.test(x)) return false;
+          if (/^Rad\.?\s*Uzm/i.test(x)) return false;
+          return x.length >= 3;
+        });
+
+      return [...new Set(lines)].join("\n");
+    } catch (e) {
+      return "";
+    }
+  }
+
+  function radiologyTextFromRaw(raw) {
+    const text = String(raw || "");
+    const bold = usableRadiologyText(extractBoldRadiologyText(text));
+    if (bold) return bold;
+    return usableRadiologyText(htmlToText(text));
+  }
+
+  function deepRadiologyTextCandidates(obj, out = [], depth = 0) {
+    if (!obj || typeof obj !== "object" || depth > 7) return out;
+    if (Array.isArray(obj)) {
+      obj.forEach((value) => deepRadiologyTextCandidates(value, out, depth + 1));
+      return out;
+    }
+
+    Object.entries(obj).forEach(([key, value]) => {
+      const keyText = norm(key);
+      if (typeof value === "string") {
+        const raw = clean(value);
+        if (raw.length > 20 && /rapor|bulgu|sonuç|sonuc|açıklama|aciklama|öneri|oneri|değerlendirme|degerlendirme/i.test(keyText)) {
+          out.push(value);
+        }
+      } else if (value && typeof value === "object") {
+        deepRadiologyTextCandidates(value, out, depth + 1);
+      }
+    });
+    return out;
+  }
+
+  function radiologyReportText(data) {
+    const root = data?.data || data || {};
+    const candidates = [
+      root.raporTextByRapor ||
+      root.raporText ||
+      root.raporMetni ||
+      root.raporHtml ||
+      root.rapor ||
+      root.bulgu ||
+      root.bulgular ||
+      root.sonuc ||
+      root.sonucAciklama ||
+      root.aciklama ||
+      "",
+      ...deepRadiologyTextCandidates(root)
+    ].filter(Boolean);
+
+    for (const candidate of candidates) {
+      const text = radiologyTextFromRaw(candidate);
+      if (text) return text;
+    }
+    return "";
+  }
+
+  function radiologyIdentity(item = {}) {
+    const reportId = clean(item.reportId || item.raporId || "");
+    if (reportId) return `rapor:${reportId}`;
+    const id = clean(item.id || item.risOrderId || "");
+    if (id) return `order:${id}`;
+    return `row:${clean(item.date || item.istemTarihi || item.risKabulTarihi || "")}|${clean(item.exam || item.risOrderKodAdi || "")}`;
+  }
+
+  function isSameDayMs(t, ref = new Date()) {
+    if (!t) return false;
+    const d = new Date(t);
+    return d.getFullYear() === ref.getFullYear() &&
+      d.getMonth() === ref.getMonth() &&
+      d.getDate() === ref.getDate();
+  }
+
+  function isNewAdmissionAlert(p) {
+    const t = parseTrDate(p.yatis);
+    if (!t) return false;
+    const now = new Date();
+    if (!isSameDayMs(t, now)) return false;
+    const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 8, 0, 0).getTime();
+    const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 17, 0, 0).getTime();
+    return t >= start && Date.now() <= end;
+  }
+
+  function startOfDayMs(t) {
+    if (!t) return 0;
+    const d = new Date(t);
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  }
+
+  function dayDiff(fromMs, toMs = Date.now()) {
+    const oneDay = 24 * 60 * 60 * 1000;
+    return Math.floor((startOfDayMs(toMs) - startOfDayMs(fromMs)) / oneDay);
+  }
+
+  function surgeryDateMs(s) {
+    return parseTrDate(
+      s.startDate ||
+      s.baslangicTarihi ||
+      s.endDate ||
+      s.bitisTarihi ||
+      s.requestDate ||
+      s.istekTarihi ||
+      s.etar ||
+      ""
+    );
+  }
+
+  function operationBadge(p) {
+    const list = (p.surgeries || []).filter((s) => surgeryDateMs(s));
+    if (!list.length) return "";
+    const now = Date.now();
+    const admission = parseTrDate(p.yatis);
+    const monthAgo = now - 31 * 24 * 60 * 60 * 1000;
+    const recent = list.filter((s) => {
+      const t = surgeryDateMs(s);
+      return t >= monthAgo || (admission && admission < monthAgo && t >= admission);
+    });
+    const candidates = recent.length ? recent : list;
+    const future = candidates
+      .filter((s) => startOfDayMs(surgeryDateMs(s)) > startOfDayMs(now))
+      .sort((a, b) => surgeryDateMs(a) - surgeryDateMs(b))[0];
+    if (future) return "PREOP";
+
+    const past = candidates
+      .filter((s) => startOfDayMs(surgeryDateMs(s)) <= startOfDayMs(now))
+      .sort((a, b) => surgeryDateMs(b) - surgeryDateMs(a))[0];
+    if (!past) return "";
+    return `POSTOP-${Math.max(0, dayDiff(surgeryDateMs(past), now))}`;
+  }
+
+  function consultKey(c) {
+    return [c.id, c.date, c.unit, c.answer].map(clean).join("|");
+  }
+
+  function consultIsAnswered(c = {}) {
+    return Boolean(cleanMultiline(htmlToText(c.answer || "")));
+  }
+
+  function consultAnswerText(raw = {}) {
+    return cleanMultiline([
+      htmlToText(raw.sonucAciklama || ""),
+      htmlToText(raw.sonucAciklama2 || "")
+    ].filter(Boolean).join("\n"));
+  }
+
+  function recentAnsweredConsults(p, hours = 10) {
+    const cutoff = Date.now() - hours * 60 * 60 * 1000;
+    return (p.consults || []).filter((c) => {
+      if (!c.answer) return false;
+      const t = parseTrDate(c.date);
+      return t && t >= cutoff;
+    });
+  }
+
+  function unseenRecentAnsweredConsults(p) {
+    const ack = state.ackConsults[p.key || patientKey(p)] || {};
+    return recentAnsweredConsults(p).filter((c) => !ack[consultKey(c)]);
+  }
+
+  function acknowledgeConsults(p) {
+    const key = p.key || patientKey(p);
+    if (!state.ackConsults[key]) state.ackConsults[key] = {};
+    recentAnsweredConsults(p).forEach((c) => {
+      state.ackConsults[key][consultKey(c)] = Date.now();
+    });
+  }
+
+  function acknowledgePatientUpdates(p) {
+    p.changedAt = 0;
+    p.changedLabels = [];
+    p.changedText = "";
+    p.changedDetail = "";
+    p.lastChangeText = "";
+    p.lastChangeDetail = "";
+  }
+
+  function isTodayTr(date) {
+    const t = parseTrDate(date);
+    if (!t) return false;
+    const now = Date.now();
+    return t >= now - 10 * 60 * 60 * 1000 && t <= now + 5 * 60 * 1000;
+  }
+
+  function clip(text, max = 70) {
+    const s = clean(text);
+    return s.length > max ? `${s.slice(0, max - 1).trim()}…` : s;
+  }
+
+  function compactDietInfo(diet) {
+    const raw = clean(diet);
+    if (!raw) return { code: "-", extra: "" };
+
+    const codes = [];
+    const extras = [];
+    const addUnique = (list, value) => {
+      const v = clean(value);
+      if (v && !list.some((x) => norm(x) === norm(v))) list.push(v);
+    };
+
+    raw.split(/\s*\/\s*|\n+|;+/).map(clean).filter(Boolean).forEach((part) => {
+      const n = norm(part);
+      if (!n || /^(yok|hayır|hayir|-)$/.test(n)) return;
+
+      let matchedCode = false;
+      if (/\br\s*[- ]?\s*a[çc]\b|a[çc]\s*kal|oral\s*yok|\bnpo\b/.test(n)) {
+        addUnique(codes, "Raç");
+        matchedCode = true;
+      }
+      if (/\br\s*[- ]?\s*1\b|rejim\s*1/.test(n)) {
+        addUnique(codes, "R1");
+        matchedCode = true;
+      }
+      if (/\br\s*[- ]?\s*2\b|rejim\s*2/.test(n)) {
+        addUnique(codes, "R2");
+        matchedCode = true;
+      }
+      if (/\br\s*[- ]?\s*3\b|rejim\s*3/.test(n)) {
+        addUnique(codes, "R3");
+        matchedCode = true;
+      }
+      if (!matchedCode && /normal|serbest/.test(n)) addUnique(codes, "Normal");
+
+      const extra = part
+        .replace(/\bR\s*[- ]?\s*(?:A[ÇC]|[123])\b/gi, " ")
+        .replace(/\bRejim\s*[123]\b/gi, " ")
+        .replace(/\bD[iıİI]yet[iı]?\b/gi, " ")
+        .replace(/\bMen[uü]\b/gi, " ")
+        .replace(/\b(Sabah|Öğle|Ogle|Akşam|Aksam|Ara\s*\d?)\b/gi, " ")
+        .replace(/[-:()]+/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+      if (extra && !/^(yok|hayır|hayir|normal|serbest)$/i.test(extra)) addUnique(extras, extra);
+    });
+
+    return {
+      code: codes.join("/") || clip(extras[0] || raw, 24),
+      extra: clip(extras.join(" / "), 85)
+    };
+  }
+
+  function readPath(obj, path) {
+    if (!obj) return "";
+    return path.split(".").reduce((acc, key) => acc == null ? undefined : acc[key], obj);
+  }
+
+  function searchNorm(text) {
+    return norm(text)
+      .replace(/ı/g, "i")
+      .replace(/ğ/g, "g")
+      .replace(/ü/g, "u")
+      .replace(/ş/g, "s")
+      .replace(/ö/g, "o")
+      .replace(/ç/g, "c");
+  }
+
+  function primitiveText(value) {
+    if (value == null) return "";
+    if (typeof value === "string") return clean(htmlToText(value));
+    if (typeof value === "number" || typeof value === "boolean") return clean(value);
+    return "";
+  }
+
+  function formLeaves(obj, path = "", depth = 0, out = []) {
+    if (obj == null || depth > 8) return out;
+    if (Array.isArray(obj)) {
+      obj.forEach((value, index) => formLeaves(value, `${path}.${index}`, depth + 1, out));
+      return out;
+    }
+    if (typeof obj !== "object") {
+      const value = primitiveText(obj);
+      if (value) out.push({ path, key: path.split(".").pop() || "", value, raw: obj });
+      return out;
+    }
+    Object.entries(obj).forEach(([key, value]) => {
+      const next = path ? `${path}.${key}` : key;
+      if (value == null) return;
+      if (typeof value === "object") formLeaves(value, next, depth + 1, out);
+      else {
+        const text = primitiveText(value);
+        if (text) out.push({ path: next, key, value: text, raw: value });
+      }
+    });
+    return out;
+  }
+
+  function formObjectText(obj) {
+    return formLeaves(obj)
+      .map((x) => x.value)
+      .filter(Boolean)
+      .join("\n");
+  }
+
+  function meaningfulFormValue(value, max = 180) {
+    const text = clean(value);
+    if (!text) return "";
+    const n = searchNorm(text);
+    if (/^(true|false|evet|hayir|hayır|var|yok|0|1|-)$/.test(n)) return "";
+    return clip(text, max);
+  }
+
+  function isCheckedValue(value) {
+    if (value === true || value === 1) return true;
+    return /^(true|evet|var|1|x|on|checked|secili|seçili|isaretli|işaretli)$/.test(searchNorm(value));
+  }
+
+  function bestFormLabel(obj = {}) {
+    const keys = ["label", "baslik", "başlık", "soru", "adi", "adı", "ad", "name", "caption", "title", "parametreAdi", "alanAdi", "formElemani.adi", "formElemani.ad"];
+    for (const key of keys) {
+      const value = primitiveText(readPath(obj, key));
+      if (value && value.length <= 120) return value;
+    }
+    return "";
+  }
+
+  function bestFormValue(obj = {}) {
+    const keys = ["deger", "değer", "value", "cevap", "aciklama", "açıklama", "text", "sonuc", "sonuç", "girisDegeri", "girişDegeri", "kayitDegeri", "kayıtDegeri", "icerik", "içerik", "skor", "puan"];
+    for (const key of keys) {
+      const value = primitiveText(readPath(obj, key));
+      if (value) return value;
+    }
+    return "";
+  }
+
+  function formLabeledValues(obj, out = [], depth = 0) {
+    if (!obj || typeof obj !== "object" || depth > 8) return out;
+    if (Array.isArray(obj)) {
+      obj.forEach((value) => formLabeledValues(value, out, depth + 1));
+      return out;
+    }
+
+    const label = bestFormLabel(obj);
+    const value = bestFormValue(obj);
+    if (label && value && searchNorm(label) !== searchNorm(value)) {
+      out.push({ label, value, raw: obj });
+    }
+
+    Object.values(obj).forEach((value) => formLabeledValues(value, out, depth + 1));
+    return out;
+  }
+
+  function firstFormField(root, labelRe, max = 180) {
+    const pairs = formLabeledValues(root);
+    for (const pair of pairs) {
+      if (!labelRe.test(searchNorm(pair.label))) continue;
+      const value = meaningfulFormValue(pair.value, max);
+      if (value && !labelRe.test(searchNorm(value))) return value;
+    }
+
+    const leaves = formLeaves(root);
+    for (const leaf of leaves) {
+      const hay = searchNorm(`${leaf.path} ${leaf.key}`);
+      if (!labelRe.test(hay)) continue;
+      const value = meaningfulFormValue(leaf.value, max);
+      if (value && !labelRe.test(searchNorm(value))) return value;
+    }
+
+    const lines = cleanMultiline(formObjectText(root)).split("\n").map(clean).filter(Boolean);
+    for (let i = 0; i < lines.length; i += 1) {
+      const line = lines[i];
+      if (!labelRe.test(searchNorm(line))) continue;
+      const inline = clean(line.replace(/^[^:：-]+[:：-]\s*/, ""));
+      if (inline && inline !== line && !labelRe.test(searchNorm(inline))) return clip(inline, max);
+      const next = lines[i + 1] || "";
+      if (meaningfulFormValue(next, max) && !labelRe.test(searchNorm(next))) return clip(next, max);
+    }
+    return "";
+  }
+
+  function normalizeAsa(value) {
+    const raw = clean(value).toLocaleUpperCase("tr-TR");
+    const digit = raw.match(/\b([1-5])\b/)?.[1];
+    if (digit) return digit;
+    const roman = raw.match(/\b(IV|III|II|I|V)\b/)?.[1];
+    return ({ I: "1", II: "2", III: "3", IV: "4", V: "5" })[roman] || "";
+  }
+
+  function extractAsa(root) {
+    const leaves = formLeaves(root);
+    for (const leaf of leaves) {
+      const hay = searchNorm(`${leaf.path} ${leaf.key} ${leaf.value}`);
+      if (!/\basa\b/.test(hay)) continue;
+      const value = normalizeAsa(leaf.value) || (isCheckedValue(leaf.raw) ? normalizeAsa(leaf.path) : "");
+      if (value) return value;
+    }
+
+    const text = formObjectText(root);
+    const match = text.match(/\bASA(?:\s*(?:skoru|score|sinifi|sınıfı))?\s*[:：-]?\s*(I{1,3}|IV|V|[1-5])\b/i);
+    return normalizeAsa(match?.[1] || "");
+  }
+
+  function addUnique(list, value) {
+    const v = clean(value);
+    if (v && !list.some((x) => searchNorm(x) === searchNorm(v))) list.push(v);
+  }
+
+  function extractPostopDestination(root) {
+    const out = [];
+    const addDest = (text) => {
+      const hay = searchNorm(text);
+      if (/pacu/.test(hay)) addUnique(out, "PACU");
+      if (/\bybu\b|yogun bakim|yoğun bakım/.test(hay)) addUnique(out, "YBÜ");
+      if (/\bklinik\b|servis/.test(hay)) addUnique(out, "Klinik");
+    };
+
+    const leaves = formLeaves(root);
+    leaves.forEach((leaf) => {
+      const hay = searchNorm(`${leaf.path} ${leaf.key} ${leaf.value}`);
+      if (!/(pacu|\bybu\b|yogun bakim|klinik|servis)/.test(hay)) return;
+      if (/fieldinfo|caption|postoperatifsolunum/.test(hay)) return;
+      if (isCheckedValue(leaf.raw) || /(postop|ameliyat sonrasi|takip yeri|gidecegi yer|gidecegi birim|gidecegi servis).*(pacu|\bybu\b|yogun bakim|klinik|servis)/.test(hay)) {
+        addDest(hay);
+      }
+    });
+
+    const scanObjects = (obj, depth = 0) => {
+      if (!obj || typeof obj !== "object" || depth > 8) return;
+      if (Array.isArray(obj)) {
+        obj.forEach((value) => scanObjects(value, depth + 1));
+        return;
+      }
+      const label = bestFormLabel(obj);
+      const checked = ["secili", "seçili", "checked", "isaretli", "işaretli", "deger", "değer", "value", "cevap"].some((key) => isCheckedValue(readPath(obj, key)));
+      if (label && checked) addDest(label);
+      Object.values(obj).forEach((value) => scanObjects(value, depth + 1));
+    };
+    scanObjects(root);
+
+    return out.join("/");
+  }
+
+  function extractAnesthesiaInfo(data) {
+    const root = data?.data || data || {};
+    const knownDiseases = firstFormField(root, /bilinen.*hastalik|ek.*hastalik|yandas.*hastalik|sistemik.*hastalik|ozgecmis|komorbid/, 120);
+    const homeMeds = firstFormField(root, /kullandigi.*ilac|kullandığı.*ilaç|ev.*ilac|ilac.*kullanimi|ilaclar/, 120);
+    const plannedOperation = firstFormField(root, /planlanan.*ameliyat|yapilacak.*ameliyat|ameliyat.*adi|operasyon.*adi|cerrahi.*islem/, 120);
+    const asa = extractAsa(root);
+    const destination = extractPostopDestination(root);
+    const rawText = clip(cleanMultiline(formObjectText(root)), 1500);
+    return {
+      asa,
+      knownDiseases,
+      homeMeds,
+      plannedOperation,
+      destination,
+      rawText
+    };
+  }
+
+  function findDeepPrimitive(obj, keyRe, depth = 0) {
+    if (!obj || typeof obj !== "object" || depth > 8) return "";
+    if (Array.isArray(obj)) {
+      for (const value of obj) {
+        const found = findDeepPrimitive(value, keyRe, depth + 1);
+        if (found) return found;
+      }
+      return "";
+    }
+    for (const [key, value] of Object.entries(obj)) {
+      if (keyRe.test(searchNorm(key)) && (typeof value === "string" || typeof value === "number")) return clean(value);
+      const found = findDeepPrimitive(value, keyRe, depth + 1);
+      if (found) return found;
+    }
+    return "";
+  }
+
+  function findPatientForAnesthesiaData(data, info = {}) {
+    const root = data?.data || data || {};
+    const ids = inferIdsFromData(root);
+    const birimSevkId = ids.birimSevkId || findDeepPrimitive(root, /birim.*sevk.*id|hastabirimsevkid/);
+    const hastaGelisId = ids.hastaGelisId || findDeepPrimitive(root, /hasta.*gelis.*id|hastagelisid|gelisid/);
+    const hastaId = ids.hastaId || findDeepPrimitive(root, /^hastaid$|hasta.*id/);
+
+    const byId = state.patients.find((p) =>
+      (birimSevkId && clean(p.birimSevkId) === clean(birimSevkId)) ||
+      (hastaGelisId && clean(p.hastaGelisId) === clean(hastaGelisId)) ||
+      (hastaId && clean(p.hastaId) === clean(hastaId))
+    );
+    if (byId) return byId;
+
+    const hay = searchNorm(`${formObjectText(root)} ${info.rawText || ""}`);
+    return state.patients.find((p) => p.adSoyad && hay.includes(searchNorm(p.adSoyad))) || null;
+  }
+
+  function applyAnesthesiaInfo(p, info = {}) {
+    p.anesthesia = { ...(p.anesthesia || {}), ...info, capturedAt: new Date().toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" }) };
+    if (info.asa) p.asa = info.asa;
+    if (info.knownDiseases) p.knownDiseases = info.knownDiseases;
+    if (info.homeMeds) p.homeMeds = info.homeMeds;
+    if (info.plannedOperation) p.plannedOperation = info.plannedOperation;
+    if (info.destination) p.postopPlace = info.destination;
+  }
+
+  function extractDietInfo(root = {}) {
+    const parts = [];
+    const add = (value) => {
+      const v = clean(typeof value === "object" ? value?.adi || value?.aciklama || "" : value);
+      if (v && !parts.some((x) => norm(x) === norm(v))) parts.push(v);
+    };
+
+    [
+      "diyet",
+      "diyet.adi",
+      "diyet.aciklama",
+      "sabahDiyetMenu.adi",
+      "ogleDiyetMenu.adi",
+      "aksamDiyetMenu.adi",
+      "ara1DiyetMenu.adi",
+      "ara2DiyetMenu.adi",
+      "araOgunDiyetMenu.adi",
+      "diyetOzellikAciklama",
+      "diyetAciklama",
+      "klinik.diyet.adi",
+      "birimSevk.diyet.adi",
+      "hastaBirimSevk.diyet.adi"
+    ].forEach((path) => add(readPath(root, path)));
+
+    Object.entries(root || {}).forEach(([key, value]) => {
+      if (/diyet/i.test(key)) add(value);
+    });
+
+    const dietId =
+      readPath(root, "diyet.id") ||
+      readPath(root, "sabahDiyetMenu.id") ||
+      readPath(root, "ogleDiyetMenu.id") ||
+      readPath(root, "aksamDiyetMenu.id") ||
+      readPath(root, "ara1DiyetMenu.id") ||
+      readPath(root, "ara2DiyetMenu.id");
+
+    const uzmanlikKodu =
+      readPath(root, "birimSevk.personel.uzmanlik.kodu") ||
+      readPath(root, "birimSevk.birim.uzmanlikKodu") ||
+      readPath(root, "birim.uzmanlikKodu") ||
+      readPath(root, "personel.uzmanlik.kodu");
+
+    return {
+      text: parts.join(" / "),
+      dietId: clean(dietId),
+      uzmanlikKodu: clean(uzmanlikKodu)
+    };
+  }
+
+  function setDietInfo(p, root) {
+    const info = extractDietInfo(root);
+    if (info.text) p.diyet = info.text;
+    if (info.dietId) p.diyetId = info.dietId;
+    if (info.uzmanlikKodu) p.uzmanlikKodu = info.uzmanlikKodu;
+  }
+
+  function extractAllergyInfo(root = {}) {
+    const parts = [];
+    const add = (value) => {
+      const v = clean(typeof value === "object" ? value?.adi || value?.aciklama || value?.alerji || "" : value);
+      if (v && !/^(yok|hayır|hayir|-)$/.test(norm(v)) && !parts.some((x) => norm(x) === norm(v))) parts.push(v);
+    };
+    [
+      "alerji",
+      "alerjiBilgisi",
+      "alerjiAciklama",
+      "hastaAlerji",
+      "hastaAlerji.aciklama",
+      "hastaGelis.alerji",
+      "hasta.alerji"
+    ].forEach((path) => add(readPath(root, path)));
+    ["hastaAlerjiList", "alerjiList", "hastaAlerjileri"].forEach((path) => {
+      const list = readPath(root, path);
+      if (Array.isArray(list)) list.forEach(add);
+    });
+    return parts.join(", ");
+  }
+
+  function sexShort(value) {
+    const n = norm(value);
+    if (/kadın|kadin|bayan|female|\bk\b/.test(n)) return "K";
+    if (/erkek|male|\be\b/.test(n)) return "E";
+    return "";
+  }
+
+  function normalizeLabName(name) {
+    const s = clean(name);
+    const n = s.toLocaleLowerCase("tr-TR");
+    if (/^wbc$/i.test(s) || /lökosit|lokosit|leukocyte|leucocyte/i.test(n)) return "WBC";
+    if (/^hgb$/i.test(s) || /^hb$/i.test(s) || /hemoglobin/i.test(n)) return "Hb";
+    if (/^plt$/i.test(s) || /trombosit/i.test(n)) return "PLT";
+    if (/kreatinin/i.test(n)) return "Kre";
+    if (/albümin|albumin/i.test(n)) return "Alb";
+    if (/^ast$/i.test(s) || /aspartat/i.test(n)) return "AST";
+    if (/^alt$/i.test(s) || /alanin/i.test(n)) return "ALT";
+    if (/^alp$/i.test(s) || /alkalen/i.test(n)) return "ALP";
+    if (/^ggt$/i.test(s) || /gamma/i.test(n)) return "GGT";
+    if (/bilirubin.*total|total.*bilirubin/i.test(n)) return "Tbil";
+    if (/bilirubin.*direkt|direkt.*bilirubin/i.test(n)) return "Dbil";
+    if (/sodyum|sodium|^na$/i.test(n)) return "Na";
+    if (/potasyum|potassium|^k$/i.test(n)) return "K";
+    if (/fosfor|phosphorus|phosphate|inorganik fosfor|^phos$/i.test(n)) return "P";
+    if (/(?:düzeltilmiş|duzeltilmis|corrected|adjusted).*?(?:kalsiyum|calcium|\bca\b)|(?:kalsiyum|calcium|\bca\b).*?(?:düzeltilmiş|duzeltilmis|corrected|adjusted)/i.test(n)) return "CaCorr";
+    if (/kalsiyum|calcium|^ca$/i.test(n)) return "Ca";
+    if (/magnezyum|magnesium|^mg$/i.test(n)) return "Mg";
+    if (/crp|c-reaktif/i.test(n)) return "CRP";
+    if (/prokalsitonin|procalcitonin/i.test(n)) return "PCT";
+    if (/amilaz/i.test(n)) return "Amilaz";
+    if (/lipaz/i.test(n)) return "Lipaz";
+    if (/^glu$/i.test(s) || /glukoz|glikoz|glucose|glisemi|gluko\s*test|glukometre|parmak\s*ucu|kan şekeri|kan sekeri|açlık şekeri|aclik sekeri/i.test(n)) return "Glu";
+    return "";
+  }
+
+  function summarizeLabs(details) {
+    const wanted = {};
+    const glucoseChecks = [];
+    const cultures = [];
+    const labSourceText = (row) => clean([
+      row?.tupAdi,
+      row?.grupAdi,
+      row?.tetkikAdi,
+      row?.ornekTuru,
+      row?.materyalAdi,
+      row?.lisHastaTupTetkik?.tupAdi,
+      row?.lisHastaTupTetkik?.lisHastaTup?.tupAdi,
+      row?.lisHastaTupTetkik?.lisHastaTup?.lisTup?.adi,
+      row?.lisHastaTupTetkik?.lisHastaTup?.ornekTuru,
+      row?.lisHastaTupTetkik?.lisHastaTup?.ornekTuru?.adi,
+      row?.lisHastaTupTetkik?.lisHastaTup?.materyalAdi,
+      row?.lisHastaTupTetkik?.lisHastaTup?.materyal?.adi,
+      row?.lisHastaTup?.tupAdi,
+      row?.lisHastaTupTetkik?.tetkik?.adi,
+      row?.tetkik?.adi
+    ].filter(Boolean).join(" "));
+    const isBloodGas = (source) => /kan\s*gaz|kangaz|blood\s*gas|arter.*gaz|ven[oö]z.*gaz|\bakg\b|\babg\b|\bvbg\b/.test(searchNorm(source));
+    const isPointOfCare = (source) => /glukometre|parmak\s*ucu|hbtc|poct|point\s*of\s*care|gluko\s*test|strip\s*glukoz/.test(searchNorm(source));
+    const isUrine = (source) => /idrar|urine|uriner|sediment|strip|tam\s*idrar|mikroskopi/.test(searchNorm(source));
+    const isCulture = (source) => /kultur|kültür|mikrobiyoloji|antibiyogram/.test(searchNorm(source));
+    const isHemogram = (source) => /hemogram|tam\s*kan|kan\s*say|cbc|mor\s*kapak|edta/.test(searchNorm(source));
+    const numericResult = (value) => {
+      const text = clean(value);
+      const match = text.match(/^[<>]?\s*[+-]?\d+(?:[,.]\d+)?(?:\s*(?:H|L|\*)){0,2}$/i);
+      if (!match) return "";
+      return clean(text.replace(/\s*(?:H|L|\*)+\s*$/i, ""));
+    };
+    const isPrimaryLab = (key, source) => {
+      if (key === "Glu") return false;
+      return !(isBloodGas(source) || isPointOfCare(source) || isUrine(source) || isCulture(source));
+    };
+    const collectionDate = (row, fallback = "") => {
+      const paths = [
+        "lisHastaTupTetkik.lisHastaTup.numuneAlmaTarihi",
+        "lisHastaTupTetkik.lisHastaTup.numuneAlimTarihi",
+        "lisHastaTupTetkik.lisHastaTup.numuneAlinmaTarihi",
+        "lisHastaTupTetkik.lisHastaTup.ornekAlmaTarihi",
+        "lisHastaTupTetkik.lisHastaTup.ornekAlimTarihi",
+        "lisHastaTupTetkik.lisHastaTup.ornekAlinmaTarihi",
+        "lisHastaTupTetkik.lisHastaTup.kanAlmaTarihi",
+        "lisHastaTupTetkik.lisHastaTup.kanAlimTarihi",
+        "lisHastaTupTetkik.lisHastaTup.almaTarihi",
+        "lisHastaTupTetkik.lisHastaTup.alimTarihi",
+        "lisHastaTupTetkik.lisHastaTup.alinmaTarihi",
+        "lisHastaTup.numuneAlmaTarihi",
+        "lisHastaTup.numuneAlimTarihi",
+        "lisHastaTup.numuneAlinmaTarihi",
+        "lisHastaTup.ornekAlmaTarihi",
+        "lisHastaTup.ornekAlimTarihi",
+        "lisHastaTup.ornekAlinmaTarihi",
+        "lisHastaTup.kanAlmaTarihi",
+        "lisHastaTup.kanAlimTarihi",
+        "lisHastaTup.almaTarihi",
+        "lisHastaTup.alimTarihi",
+        "lisHastaTup.alinmaTarihi",
+        "numuneAlmaTarihi",
+        "numuneAlimTarihi",
+        "numuneAlinmaTarihi",
+        "ornekAlmaTarihi",
+        "ornekAlimTarihi",
+        "ornekAlinmaTarihi",
+        "kanAlmaTarihi",
+        "kanAlimTarihi",
+        "almaTarihi",
+        "alimTarihi",
+        "alinmaTarihi"
+      ];
+      for (const path of paths) {
+        const value = clean(readPath(row, path));
+        if (value) return value;
+      }
+      return fallback || "";
+    };
+    const add = (key, value, date, source = "", historical = false) => {
+      if (!key || value == null || value === "") return;
+      const numericValue = numericResult(value);
+      if (!numericValue) return;
+      if (key === "Glu" && isPointOfCare(source)) {
+        const item = {
+          value: numericValue,
+          date: date || "",
+          sortKey: dateTimeKey(date),
+          source,
+          historical
+        };
+        const exists = glucoseChecks.some((x) => x.value === item.value && x.date === item.date);
+        if (!exists) glucoseChecks.push(item);
+        return;
+      }
+      if (!wanted[key]) wanted[key] = [];
+      const item = {
+        value: numericValue,
+        date: date || "",
+        sortKey: dateTimeKey(date),
+        source,
+        bloodGas: isBloodGas(source),
+        pointOfCare: isPointOfCare(source),
+        urine: isUrine(source),
+        culture: isCulture(source),
+        primaryLab: isPrimaryLab(key, source),
+        historical
+      };
+      const exists = wanted[key].some((x) => x.value === item.value && x.date === item.date);
+      if (!exists) wanted[key].push(item);
+    };
+
+    for (const row of details || []) {
+      const test = row?.lisHastaTupTetkik?.tetkik?.adi || row?.tetkik?.adi || "";
+      const value = row?.lisHastaTupTetkik?.sonucByRapor || row?.sonucByRapor || row?.sonuc || "";
+      const resultDate = row?.lisHastaTupTetkik?.sonucTarihi || row?.lisHastaTupTetkik?.onayTarihi || row?.sonucTarihi || row?.onayTarihi || "";
+      const date = collectionDate(row, resultDate);
+      const source = labSourceText(row);
+      if (isCulture(source + " " + test)) {
+        const hay = searchNorm(source + " " + test);
+        const name = /doku|tissue/.test(hay) ? "Doku kültürü"
+          : /kan|blood/.test(hay) ? "Kan kültürü"
+          : /yara|wound/.test(hay) ? "Yara kültürü"
+          : (clean(test) || "Kültür");
+        const item = { name, date:date || resultDate || "" };
+        if (!cultures.some((x) => norm(x.name) === norm(item.name) && shortDate(x.date) === shortDate(item.date))) cultures.push(item);
+      }
+      const key = normalizeLabName(test);
+      if (!key) continue;
+      add(key, value, date, source);
+
+      for (const old of row?.oncekiSonucList || []) {
+        const oldTest = old?.lisHastaTupTetkik?.tetkik?.adi || old?.tetkik?.adi || old?.tetkikAdi || old?.parametreAdi || test;
+        const oldKey = normalizeLabName(oldTest) || key;
+        const oldSource = labSourceText(old) || source;
+        const oldResultDate = old.sonucTarihi || old.onayTarihi || "";
+        add(oldKey, old.sonuc, collectionDate(old, oldResultDate), oldSource, true);
+      }
+    }
+
+    Object.keys(wanted).forEach((key) => {
+      wanted[key].sort((a, b) => String(b.sortKey || "").localeCompare(String(a.sortKey || "")));
+      wanted[key] = wanted[key].slice(0, 8);
+    });
+
+    if (wanted.WBC?.length) {
+      const companions = [...(wanted.Hb || []), ...(wanted.PLT || [])];
+      const sameMoment = (item) => {
+        const itemKey = item.sortKey || dateTimeKey(item.date);
+        if (!itemKey) return false;
+        return companions.some((other) => (other.sortKey || dateTimeKey(other.date)) === itemKey);
+      };
+      const cleanWbc = wanted.WBC.filter((item) =>
+        item.primaryLab &&
+        !item.urine &&
+        !item.culture &&
+        !item.bloodGas &&
+        !item.pointOfCare &&
+        (isHemogram(item.source) || sameMoment(item))
+      );
+      wanted.WBC = (cleanWbc.length ? cleanWbc : wanted.WBC.filter((item) =>
+        item.primaryLab && !item.urine && !item.culture && !item.bloodGas && !item.pointOfCare
+      )).slice(0, 8);
+    }
+
+    glucoseChecks.sort((a, b) => String(b.sortKey || "").localeCompare(String(a.sortKey || "")));
+    cultures.sort((a, b) => String(dateTimeKey(b.date)).localeCompare(String(dateTimeKey(a.date))));
+    return { labs: wanted, glucoseChecks: glucoseChecks.slice(0, 12), cultures };
+  }
+
+  function labLine(labs) {
+    const val = (k) => (labs?.[k] || []).slice(0, 3).map((x) => x.value).join("/");
+    const pair = (a, b) => {
+      const x = labs?.[a] || [];
+      const y = labs?.[b] || [];
+      return Array.from({ length: Math.max(x.length, y.length) }).slice(0, 3)
+        .map((_, i) => [x[i]?.value, y[i]?.value].filter(Boolean).join("-"))
+        .filter(Boolean)
+        .join("/");
+    };
+    return [
+      `WBC:${val("WBC")}`,
+      `Hb:${val("Hb")}`,
+      `Kre:${val("Kre")}`,
+      `CRP:${val("CRP")}`,
+      `PCT:${val("PCT")}`,
+      `Glu:${val("Glu")}`,
+      `Na-K:${pair("Na", "K")}`,
+      `P-Ca-dCa-Mg:${[val("P"), val("Ca"), val("CaCorr"), val("Mg")].filter(Boolean).join("-")}`,
+      `AST-ALT:${pair("AST", "ALT")}`,
+      `ALP-GGT:${pair("ALP", "GGT")}`,
+      `Tbil-Dbil:${pair("Tbil", "Dbil")}`
+    ].join(" | ");
+  }
+
+  function relevantLabDate(labs) {
+    const keys = ["WBC", "Hb", "PLT", "Kre", "Alb", "AST", "ALT", "ALP", "GGT", "Tbil", "Dbil", "CRP", "PCT", "Amilaz", "Lipaz", "Na", "K", "P", "Ca", "CaCorr", "Mg"];
+    const latest = keys
+      .flatMap((key) => labs?.[key] || [])
+      .filter((x) => x?.date)
+      .filter((x) => x.primaryLab)
+      .sort((a, b) => String(b.sortKey || dateTimeKey(b.date)).localeCompare(String(a.sortKey || dateTimeKey(a.date))))[0];
+    return shortDate(latest?.date || "");
+  }
+
+  function labSeries(labs, key, max = 6) {
+    return (labs?.[key] || []).slice(0, max).map((x) => x.value).join("/");
+  }
+
+  function pairLabSeries(labs, a, b, max = 6) {
+    const x = labs?.[a] || [];
+    const y = labs?.[b] || [];
+    return Array.from({ length: Math.max(x.length, y.length) }).slice(0, max)
+      .map((_, i) => {
+        const left = x[i]?.value || "";
+        const right = y[i]?.value || "";
+        return left && right ? `${left}-${right}` : (left || right);
+      })
+      .filter(Boolean)
+      .join("/");
+  }
+
+  const VISIT_LAB_ROWS = [
+    "WBC", "Hb", "PLT", "Kre", "Alb", "AST", "ALT", "ALP", "GGT",
+    "Tbil", "Dbil", "Glu", "Amilaz", "Lipaz",
+    "CRP", "PCT"
+  ];
+
+  const VISIT_LAB_LABELS = {
+    WBC: "WBC",
+    Hb: "Hb",
+    PLT: "PLT",
+    Kre: "Kre",
+    Alb: "Alb",
+    AST: "AST",
+    ALT: "ALT",
+    ALP: "ALP",
+    GGT: "GGT",
+    Tbil: "T.Bil",
+    Dbil: "D.Bil",
+    Glu: "Glu",
+    Na: "Na",
+    K: "K",
+    P: "P",
+    Ca: "Ca",
+    CaCorr: "dCa",
+    Mg: "Mg",
+    Amilaz: "Ami",
+    Lipaz: "Lip",
+    CRP: "CRP",
+    PCT: "PCT"
+  };
+
+  const LAB_NORMAL_RANGES = {
+    WBC: [4, 10.5],
+    Hb: [12, 17.5],
+    PLT: [150, 450],
+    Kre: [0.5, 1.3],
+    Alb: [3.5, 5.2],
+    AST: [0, 40],
+    ALT: [0, 41],
+    ALP: [30, 120],
+    GGT: [0, 60],
+    Tbil: [0, 1.2],
+    Dbil: [0, 0.3],
+    Glu: [70, 180],
+    Na: [135, 145],
+    K: [3.5, 5.1],
+    P: [2.5, 4.5],
+    Ca: [8.5, 10.5],
+    CaCorr: [8.5, 10.5],
+    Mg: [1.6, 2.6],
+    Amilaz: [0, 100],
+    Lipaz: [0, 60],
+    CRP: [0, 5],
+    PCT: [0, 0.5]
+  };
+
+  function labNumericValue(value) {
+    const match = String(value || "").replace(",", ".").match(/-?\d+(?:\.\d+)?/);
+    return match ? Number(match[0]) : NaN;
+  }
+
+  function abnormalLabValue(key, value) {
+    const range = LAB_NORMAL_RANGES[key];
+    const n = labNumericValue(value);
+    if (!range || !Number.isFinite(n)) return false;
+    return n < range[0] || n > range[1];
+  }
+
+  function labVisitDates(labs = {}, max = 8) {
+    const byDay = new Map();
+    const dateKeys = [...VISIT_LAB_ROWS, "Na", "K", "P", "Ca", "CaCorr", "Mg"];
+    dateKeys.forEach((key) => {
+      (labs?.[key] || []).forEach((item) => {
+        const label = shortDate(item.date || "");
+        const sortKey = item.sortKey || dateTimeKey(item.date || "");
+        if (!label || !sortKey) return;
+        const old = byDay.get(label);
+        if (!old || String(sortKey).localeCompare(String(old.sortKey || "")) > 0) {
+          byDay.set(label, { label, sortKey });
+        }
+      });
+    });
+    return Array.from(byDay.values())
+      .sort((a, b) => String(b.sortKey || "").localeCompare(String(a.sortKey || "")))
+      .slice(0, max);
+  }
+
+  function compactLabDateHeader(dates = []) {
+    const labels = [...new Set(dates.map((item) => clean(item?.label)).filter(Boolean))];
+    if (!labels.length) return "";
+    if (labels.length === 1) return labels[0];
+    const pieces = labels.map((label) => label.split("."));
+    const sameMonth = pieces.every((part) => part.length >= 2 && part.slice(1).join(".") === pieces[0].slice(1).join("."));
+    return sameMonth ? pieces.map((part) => part[0]).join("/") : labels.join("/");
+  }
+
+  function labValueForDate(labs = {}, key, dateLabel) {
+    const items = (labs?.[key] || [])
+      .filter((item) => shortDate(item.date || "") === dateLabel)
+      .sort((a, b) => String(b.sortKey || dateTimeKey(b.date || "")).localeCompare(String(a.sortKey || dateTimeKey(a.date || ""))));
+    return items[0]?.value || "";
+  }
+
+  function padVisitCell(text, width) {
+    const s = String(text || "");
+    return s.length >= width ? s : s + " ".repeat(width - s.length);
+  }
+
+  function visitLabCellText(key, raw) {
+    if (!raw) return "X";
+    return String(raw);
+  }
+
+  function visitLabCellHtml(key, raw) {
+    if (!raw) return "X";
+    const value = escapeHtml(raw);
+    return abnormalLabValue(key, raw) ? `<strong>${value}</strong>` : value;
+  }
+
+  function visitLabTableText(labs = {}, vitalLine = "") {
+    const dates = labVisitDates(labs, 8);
+    if (!dates.length) return vitalLine ? ["Tetkik\tSon", `Son Vital\t${vitalLine}`].join("\n") : "Lab: -";
+    const header = ["Tetkik", ...dates.map((d) => d.label)].join("\t");
+    const rows = VISIT_LAB_ROWS.map((key) => {
+      const cells = dates.map((d) => {
+        const raw = labValueForDate(labs, key, d.label);
+        return visitLabCellText(key, raw);
+      });
+      return [VISIT_LAB_LABELS[key] || key, ...cells].join("\t");
+    });
+    rows.push(["Elekt", latestElectrolyteText(labs), ...dates.slice(1).map(() => "")].join("\t"));
+    if (vitalLine) rows.push(["Son Vital", vitalLine, ...dates.slice(1).map(() => "")].join("\t"));
+    return [header, ...rows].join("\n");
+  }
+
+  function compactLabVitalsText(labs = {}, vitalLine = "") {
+    const dates = labVisitDates(labs, 8);
+    const max = 8;
+    const rows = [
+      `Lab :${compactLabDateHeader(dates)}`,
+      `wbc:${labSeries(labs, "WBC", max) || "-"}`,
+      `hb:${labSeries(labs, "Hb", max) || "-"}`,
+      `plt:${labSeries(labs, "PLT", max) || "-"}`,
+      `kre:${labSeries(labs, "Kre", max) || "-"}`,
+      `alb:${labSeries(labs, "Alb", max) || "-"}`,
+      `AST-ALT:${pairLabSeries(labs, "AST", "ALT", max) || "-"}`,
+      `ALP-GGT:${pairLabSeries(labs, "ALP", "GGT", max) || "-"}`,
+      `Tbil-Dbil:${pairLabSeries(labs, "Tbil", "Dbil", max) || "-"}`,
+      `CRP:${labSeries(labs, "CRP", max) || "-"}`,
+      `Pc:${labSeries(labs, "PCT", max) || "-"}`,
+      `Glu:${labSeries(labs, "Glu", max) || "-"}`,
+      `Elekt:${latestElectrolyteText(labs)}`,
+      `amilaz-lipaz:${pairLabSeries(labs, "Amilaz", "Lipaz", max) || "-"}`,
+      `Vital:${vitalLine || "-"}`
+    ];
+    return rows.join("\n");
+  }
+
+  function latestElectrolyteText(labs = {}) {
+    const keys = ["Na", "K", "P", "Ca", "CaCorr", "Mg"];
+    const parts = keys.map((key) => {
+      const item = (labs?.[key] || [])[0] || {};
+      const label = key === "CaCorr" ? "dCa" : key;
+      return `${label}:${item.value || "X"}`;
+    });
+    return parts.join(" ");
+  }
+
+  function visitLabTableHtml(labs = {}, vitalLine = "") {
+    const dates = labVisitDates(labs, 8);
+    const tableStyle = "border-collapse:collapse;font-family:Arial Narrow,Arial,sans-serif;font-size:7.8pt;line-height:1.15;table-layout:fixed;width:100%;";
+    const thStyle = "text-align:center;font-weight:bold;padding:1.2px 2.4px;border:1px solid #d9dee6;white-space:nowrap;";
+    const firstThStyle = "text-align:left;font-weight:bold;padding:1.2px 2.4px;border:1px solid #d9dee6;white-space:nowrap;width:41pt;";
+    const tdStyle = "text-align:center;padding:1.2px 2.4px;border:1px solid #e5e7eb;vertical-align:middle;white-space:nowrap;";
+    const firstTdStyle = "text-align:left;padding:1.2px 2.4px;border:1px solid #e5e7eb;vertical-align:middle;white-space:nowrap;font-weight:bold;width:41pt;";
+    if (!dates.length) {
+      return vitalLine
+        ? `<table style="${tableStyle}"><thead><tr><th style="${firstThStyle}">Tetkik</th><th style="${thStyle}">Son</th></tr></thead><tbody><tr><td style="${firstTdStyle}"><strong>Vital</strong></td><td style="${tdStyle}">${escapeHtml(vitalLine)}</td></tr></tbody></table>`
+        : `<p>Lab: -</p>`;
+    }
+    const header = [`<th style="${firstThStyle}">Tetkik</th>`, ...dates.map((d) => `<th style="${thStyle}">${escapeHtml(d.label)}</th>`)].join("");
+    const rows = VISIT_LAB_ROWS.map((key) => {
+      const cells = dates.map((d) => {
+        const raw = labValueForDate(labs, key, d.label);
+        return `<td style="${tdStyle}">${visitLabCellHtml(key, raw)}</td>`;
+      }).join("");
+      return `<tr><td style="${firstTdStyle}">${escapeHtml(VISIT_LAB_LABELS[key] || key)}</td>${cells}</tr>`;
+    }).join("")
+      + `<tr><td style="${firstTdStyle}"><strong>Elekt</strong></td><td style="${tdStyle};text-align:left;" colspan="${Math.max(1, dates.length)}">${escapeHtml(latestElectrolyteText(labs))}</td></tr>`
+      + (vitalLine ? `<tr><td style="${firstTdStyle}"><strong>Vital</strong></td><td style="${tdStyle};text-align:left;" colspan="${Math.max(1, dates.length)}">${escapeHtml(vitalLine)}</td></tr>` : "");
+    return `
+      <table style="${tableStyle}">
+        <thead><tr>${header}</tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    `;
+  }
+
+  function latestVitalLine(vitals = [], p = null) {
+    const v = (vitals || [])[0] || {};
+    const ta = [v.sys, v.dia].filter(Boolean).join("/");
+    const freeText = p ? patientFreeText(p) : "";
+    const parts = [
+      shortDate(v.date) || "",
+      ta ? `TA:${ta}` : "",
+      v.pulse ? `N:${v.pulse}` : "",
+      v.temp ? `A:${v.temp}` : "",
+      v.spo2 ? `SpO2:${v.spo2}` : "",
+      (v.resp || extractInlineValue(freeText, [/\bSS\s*[:\-]?\s*(\d+)/i, /solunum\s*[:\-]?\s*(\d+)/i])) ? `SS:${v.resp || extractInlineValue(freeText, [/\bSS\s*[:\-]?\s*(\d+)/i, /solunum\s*[:\-]?\s*(\d+)/i])}` : "",
+      (v.pain || extractInlineValue(freeText, [/ağr[ıi]\s*[:\-]?\s*(\d+\s*\/\s*10|\d+)/i, /\bVAS\s*[:\-]?\s*(\d+\s*\/\s*10|\d+)/i])) ? `Agr:${v.pain || extractInlineValue(freeText, [/ağr[ıi]\s*[:\-]?\s*(\d+\s*\/\s*10|\d+)/i, /\bVAS\s*[:\-]?\s*(\d+\s*\/\s*10|\d+)/i])}` : ""
+    ].filter(Boolean);
+    return parts.length ? parts.join(" ") : "-";
+  }
+
+  function formatRadiology(radiology = [], max = 6, textLimit = 220) {
+    return (radiology || []).slice(0, max).map((x) => {
+      const report = clip(cleanReportText(x.reportText || ""), textLimit);
+      return `(${shortDate(x.date) || "-"}) ${x.exam || "Radyoloji"}${report ? ":\n" + report : (x.reportId ? " [rapor var]" : "")}`;
+    }).join("\n---\n");
+  }
+
+  function doctorInitials(name) {
+    const cleaned = clean(String(name || "")
+      .split(/[;,/]/)[0]
+      .replace(/\b(?:Dr|Doktor|Uzm|Uzman|Op|Operatör|Operator|Prof|Doç|Doc|Yrd)\.?\b/gi, " ")
+      .replace(/\s+/g, " "));
+    const initials = cleaned
+      .split(/\s+/)
+      .map((part) => part.match(/[A-Za-zÇĞİÖŞÜçğıöşü]/)?.[0] || "")
+      .filter(Boolean)
+      .map((x) => x.toLocaleUpperCase("tr-TR"))
+      .join("");
+    return initials || "DR";
+  }
+
+  function patientFreeText(p) {
+    return [
+      p.tani,
+      p.clinical,
+      p.knownDiseases,
+      p.homeMeds,
+      p.plannedOperation,
+      p.postopPlace,
+      p.anesthesia?.rawText,
+      ...(p.nursing || []).map((x) => x.text),
+      ...(p.consults || []).map((x) => [x.request, x.answer].filter(Boolean).join(" ")),
+      ...(p.radiology || []).map((x) => [x.exam, x.reportText].filter(Boolean).join(" "))
+    ].filter(Boolean).join("\n");
+  }
+
+  function aoeHasCancerEvidence(text) {
+    return /malignite|kanser|karsinom|adenokarsinom|neoplazm|t[üu]m[öo]r|lenfoma|l[öo]semi|\b(?:mide|kolon|rektum|pankreas|meme|akci[ğg]er|karaci[ğg]er|prostat|over|endometrium|serviks|tiroid|[öo]zofagus|mesane|b[öo]brek|koledok|safra\s+yolu)\s+ca\b/i.test(String(text || ""));
+  }
+
+  function extractKnownDiseases(p) {
+    const direct = clean(p.knownDiseases || p.anesthesia?.knownDiseases || "");
+    if (direct) return clip(direct, 80);
+
+    const text = patientFreeText(p);
+    const found = [];
+    const map = [
+      ["DM", /\bDM\b|diabetes|diyabet/i],
+      ["HT", /\bHT\b|hipertansiyon/i],
+      ["KAH", /\bKAH\b|koroner/i],
+      ["KKY", /\bKKY\b|kalp yetmez/i],
+      ["KOAH", /\bKOAH\b/i],
+      ["ASTIM", /ast[ıi]m/i],
+      ["KBY", /\bKBY\b|kronik b[öo]brek/i],
+      ["AF", /\bAF\b|atriyal fibrilasyon/i],
+      ["SVO", /\bSVO\b|inme|serebrovask/i],
+      ["CA", { test:aoeHasCancerEvidence }]
+    ];
+    map.forEach(([label, re]) => {
+      if (re.test(text) && !found.includes(label)) found.push(label);
+    });
+    return found.join(", ");
+  }
+
+  function extractInlineValue(text, patterns) {
+    for (const re of patterns) {
+      const match = String(text || "").match(re);
+      if (match?.[1]) return clean(match[1]).replace(/[.;,]$/, "");
+    }
+    return "";
+  }
+
+  function extractCardMeta(p) {
+    const text = patientFreeText(p);
+    const anesthesia = p.anesthesia || {};
+    const orders = (p.orders || []).slice(0, 8).map((x) => clean(`${x.name || ""} ${x.dose || ""}`)).filter(Boolean);
+    const asa = p.asa || anesthesia.asa || extractInlineValue(text, [/\bASA\s*[:\-]?\s*([1-5])/i]);
+    const allergy = p.alerji || extractInlineValue(text, [/alerji(?:si)?\s*[:\-]?\s*([^\n.;]+)/i]);
+    const ki = p.homeMeds || anesthesia.homeMeds || extractInlineValue(text, [
+      /K[İI]\s*[:\-]\s*([^\n]+)/i,
+      /kullandığı ilaç(?:lar)?\s*[:\-]\s*([^\n]+)/i,
+      /ev ilaç(?:ları)?\s*[:\-]\s*([^\n]+)/i
+    ]);
+    const go =
+      p.plannedOperation ||
+      anesthesia.plannedOperation ||
+      extractInlineValue(text, [/G[ÖO]\s*[:\-]\s*([^\n]+)/i, /ameliyat\s*[:\-]\s*([^\n]+)/i, /operasyon\s*[:\-]\s*([^\n]+)/i]) ||
+      (text.match(/kolesistektomi|apendektomi|ileostomi|kolostomi|laparotomi|debridman|ERCP|stent|rezeksiyon/i)?.[0] || "");
+    const destination = p.postopPlace || anesthesia.destination || "";
+    const plan =
+      extractInlineValue(text, [/plan\s*[:\-]\s*([^\n]+)/i, /karar\s*[:\-]\s*([^\n]+)/i]) ||
+      clean((p.clinical || "").split("\n").find((x) => /plan|öner|devam|taburcu|operasyon|ameliyat|ERCP|MRCP/i.test(x)) || "") ||
+      clean((p.nursing || [])[0]?.text || "").split("\n").slice(0, 2).join(" ");
+    return {
+      bh: extractKnownDiseases(p),
+      ki: clip(ki || orders.slice(0, 3).join(", "), 80),
+      go: clip(go, 80),
+      allergy: allergy && !/^(yok|hayır|hayir|-)/i.test(allergy) ? clip(allergy, 50) : "",
+      asa,
+      destination,
+      plan: clip(plan, 170)
+    };
+  }
+
+  function extractFollowItems(p) {
+    const text = patientFreeText(p);
+    const item = (label, patterns, fallback = "") => {
+      const value = extractInlineValue(text, patterns) || fallback;
+      return value ? { label, value: clip(value, 28) } : null;
+    };
+    return [
+      item("Oral", [/oral\s*[:\-]?\s*([+\-]|var|yok|a[çc][ıi]k|kapal[ıi])/i]),
+      item("Bulantı/Kusma", [/(?:bulant[ıi]|kusma)\s*[:\-]?\s*([+\-]|var|yok)/i]),
+      item("Gaz", [/gaz\s*[:\-]?\s*([+\-]|var|yok|ç[ıi]kt[ıi])/i]),
+      item("Gaita", [/gaita\s*[:\-]?\s*([+\-]|var|yok|ç[ıi]kt[ıi])/i]),
+      item("İdrar", [/[iı]drar\s*[:\-]?\s*([^\n.;,]+)/i]),
+      item("Dren", [/dren\s*[:\-]?\s*([^\n.;,]+)/i]),
+      item("Mobilizasyon", [/mobilizasyon\s*[:\-]?\s*([+\-]|var|yok|mobil)/i])
+    ].filter(Boolean);
+  }
+
+  function latestValue(list, key = "value") {
+    return list?.[0]?.[key] || "";
+  }
+
+  function latestGlucoseCheck(p = {}) {
+    return p.glucoseChecks?.[0] || {};
+  }
+
+  function glucoseCheckText(p = {}, max = 6) {
+    return (p.glucoseChecks || []).slice(0, max).map((item) =>
+      `${item.value || "-"} mg/dL${item.date ? " | " + item.date : ""}`
+    ).join("\n");
+  }
+
+  function glucoseCheckHtml(p = {}, t = null) {
+    const item = latestGlucoseCheck(p);
+    if (!item.value) return "";
+    const border = t?.accent || "#f59e0b";
+    const bg = t?.surface || "#fff";
+    const text = t?.text || "#0f172a";
+    const label = t?.primary2 || "#92400e";
+    return `
+      <div style="display:grid;grid-template-columns:auto 1fr auto;gap:7px;align-items:center;border:1px solid ${border};border-radius:9px;background:${bg};padding:6px 8px;margin-top:7px;color:${text};">
+        <div style="width:25px;height:25px;border-radius:7px;background:${border};color:#111827;display:grid;place-items:center;font-size:11px;font-weight:950;">G</div>
+        <div style="font-size:11px;font-weight:900;color:${label};">Glukotest</div>
+        <div style="text-align:right;">
+          <b style="font-size:17px;">${escapeHtml(item.value)} mg/dL</b>
+          <div style="font-size:10px;opacity:.72;">${escapeHtml(item.date || "")}</div>
+        </div>
+      </div>
+    `;
+  }
+
+  function trendMark(list) {
+    const current = Number(String(list?.[0]?.value || "").replace(",", "."));
+    const previous = Number(String(list?.[1]?.value || "").replace(",", "."));
+    if (!Number.isFinite(current) || !Number.isFinite(previous) || current === previous) return "";
+    return current > previous ? "↑" : "↓";
+  }
+
+  function labTileHtml(label, value, trend = "", danger = false) {
+    if (!value) value = "-";
+    const color = danger || trend ? "#dc2626" : "#0f172a";
+    return `
+      <div style="border:1px solid #dbe3ee;border-radius:7px;background:#fff;padding:4px 5px;text-align:center;min-width:0;box-shadow:0 1px 2px rgba(15,23,42,.04);">
+        <div style="font-size:10px;color:#0b3f91;font-weight:700;">${escapeHtml(label)}</div>
+        <div style="font-size:13px;font-weight:800;color:${color};line-height:1.12;">${escapeHtml(String(value))}${trend ? ` <span>${escapeHtml(trend)}</span>` : ""}</div>
+      </div>
+    `;
+  }
+
+  function labTilesHtml(labs) {
+    const one = (key, label, dangerFn = () => false) => {
+      const list = labs?.[key] || [];
+      const value = latestValue(list);
+      return labTileHtml(label, value, trendMark(list), dangerFn(Number(String(value).replace(",", "."))));
+    };
+    const pair = (a, b, label, dangerFn = () => false) => {
+      const av = latestValue(labs?.[a] || []);
+      const bv = latestValue(labs?.[b] || []);
+      const value = av || bv ? [av || "-", bv || "-"].join("/") : "";
+      return labTileHtml(label, value, "", dangerFn(Number(String(av).replace(",", ".")), Number(String(bv).replace(",", "."))));
+    };
+    return [
+      one("WBC", "WBC"),
+      one("Hb", "Hb", (v) => v && v < 12),
+      one("PLT", "Plt"),
+      one("Kre", "Kre", (v) => v && v > 1.3),
+      one("CRP", "CRP", (v) => v && v > 5),
+      one("PCT", "PCT", (v) => v && v > 0.5),
+      one("Glu", "Glu", (v) => v && (v < 70 || v > 180)),
+      one("Na", "Na", (v) => v && (v < 135 || v > 145)),
+      one("K", "K", (v) => v && (v < 3.5 || v > 5.2)),
+      one("P", "P", (v) => v && (v < 2.5 || v > 4.5)),
+      one("Ca", "Ca", (v) => v && (v < 8.5 || v > 10.5)),
+      one("Mg", "Mg", (v) => v && (v < 1.6 || v > 2.6)),
+      pair("AST", "ALT", "AST/ALT", (a, b) => a > 40 || b > 40),
+      pair("ALP", "GGT", "ALP/GGT", (a, b) => a > 130 || b > 60),
+      pair("Tbil", "Dbil", "Tbil/Dbil", (a, b) => a > 1.2 || b > 0.3)
+    ].join("");
+  }
+
+  const REPLACEMENT_SOURCES = {
+    K: "https://doclibrary-rcht.cornwall.nhs.uk/RoyalCornwallHospitalsTrust/Clinical/Pharmacy/ManagementOfHypokalaemiaInAdultsClinicalGuideline.pdf",
+    Mg: "https://www.sps.nhs.uk/articles/treating-acute-hypomagnesaemia-in-adults/",
+    P: "https://apps.worcsacute.nhs.uk/KeyDocumentPortal/Home/DownloadFile/1560",
+    Ca: "https://www.gloshospitals.nhs.uk/documents/2046/Hypocalcaemia.pdf",
+    CaCorr: "https://www.gloshospitals.nhs.uk/documents/2046/Hypocalcaemia.pdf",
+    Na: "https://academic.oup.com/ejendo/article/170/3/G1/6668028"
+  };
+
+  function electrolyteStatus(key, value) {
+    const range = LAB_NORMAL_RANGES[key];
+    const n = labNumericValue(value);
+    if (!range || !Number.isFinite(n)) return "missing";
+    if (n < range[0]) return "low";
+    if (n > range[1]) return "high";
+    return "normal";
+  }
+
+  function replacementAdvice(key, value) {
+    const n = labNumericValue(value);
+    const status = electrolyteStatus(key, value);
+    if (status === "missing") return { status, title: "Sonuç yok", text: "Güncel sonuç bekleniyor." };
+    if (status === "normal") return { status, title: "Normal", text: "Replasman görünmüyor." };
+    if (status === "high") return { status, title: "Yüksek", text: key === "K"
+      ? "Replasman verme. Hemolizi dışla; sonucu, EKG'yi ve böbrek fonksiyonunu hızla değerlendir."
+      : "Replasman verme; sonucu doğrula ve yüksekliğin nedenine yönelik kurum protokolünü değerlendir." };
+
+    if (key === "Mg") {
+      const mmol = n * 0.4114;
+      if (mmol >= 0.5) return { status, title: "Düşük", text: `≈${mmol.toFixed(2)} mmol/L. Hafif/asemptomatik eksiklikte kaynak: oral 10–24 mmol/gün, bölünmüş doz. Oral alamama ve eGFR düşüklüğünde yolu/dozu yeniden değerlendir.` };
+      return { status, title: "Ciddi düşük", text: `≈${mmol.toFixed(2)} mmol/L. Ciddi/semptomatik eksiklikte hastane koşulunda IV MgSO₄; kaynak başlangıçta 20 mmol belirtir. EKG, refleks, solunum, diürez ve eGFR kontrolü gerekir.` };
+    }
+    if (key === "P") {
+      const mmol = n * 0.3229;
+      if (mmol >= 0.6) return { status, title: "Hafif düşük", text: `≈${mmol.toFixed(2)} mmol/L. Asemptomatik hastada çoğunlukla replasman gerekmez; neden/beslenme değerlendirilip günlük takip edilir.` };
+      if (mmol >= 0.32) return { status, title: "Orta düşük", text: `≈${mmol.toFixed(2)} mmol/L. Oral yol uygunsa kaynak Phosphate-Sandoz 1–2 tablet, günde 3 kez (tablet başına 16,1 mmol) ve günlük doz ayarı belirtir. <60 kg, eGFR ve sodyum yükünü kontrol et.` };
+      return { status, title: "Ciddi düşük", text: `≈${mmol.toFixed(2)} mmol/L. Semptom/refeeding ve solunum-kardiyak bulgular açısından acil değerlendir; enteral/IV replasmanı kurum protokolü ve yakın Ca/K/Mg/P takibiyle planla.` };
+    }
+    if (key === "CaCorr") return { status, title: "Düşük", text: "FONET'in raporladığı düzeltilmiş Ca düşük. İyonize Ca, Mg, semptom ve EKG ile doğrula; Mg düşüklüğünü önce düzelt. Doz/yol hasta özelinde ve kurum hipokalsemi protokolüne göre belirlenir." };
+    if (key === "K") return n < 3
+      ? { status, title: "Ciddi düşük", text: "K <3,0 mmol/L: EKG, Mg, eGFR/diürez ve ilaçları kontrol et; oral/IV KCl ve miktarı kurum hipokalemi protokolüne göre belirle." }
+      : { status, title: "Düşük", text: "Oral K replasmanını değerlendir; miktarı eGFR, devam eden kayıp, Mg ve ilaçlara göre kurum hipokalemi protokolünden seç." };
+    if (key === "Na") return { status, title: "Düşük", text: "Süre, semptom, volüm durumu ve neden bilinmeden miktar/hız önerilmez. Hiponatremi protokolüyle güvenli düzeltme hızını belirle." };
+    return { status, title: "Düşük", text: "Sonucu doğrula ve kurum replasman protokolünü uygula." };
+  }
+
+  function patientElectrolytes(p) {
+    return ["Na", "K", "Mg", "CaCorr", "P"].map((key) => {
+      const item = p?.labs?.[key]?.[0] || {};
+      if (key === "CaCorr") {
+        const total = p?.labs?.Ca?.[0] || {};
+        return {
+          key,
+          label: "Ca/dCa",
+          adviceLabel: "dCa",
+          value: item.value || "",
+          displayValue: `${total.value || "—"}/${item.value || "—"}`,
+          date: item.date || total.date || "",
+          advice: replacementAdvice(key, item.value)
+        };
+      }
+      return { key, label: key, adviceLabel: key, value: item.value || "", displayValue: item.value || "", date: item.date || "", advice: replacementAdvice(key, item.value) };
+    });
+  }
+
+  function abnormalElectrolyteCount(p) {
+    return patientElectrolytes(p).filter((x) => x.advice.status === "low" || x.advice.status === "high").length;
+  }
+
+  function compactReplacementText(item) {
+    const n = labNumericValue(item.value);
+    if (item.advice.status === "high") return `${item.key === "CaCorr" ? "dCa" : item.key}: replasman verme`;
+    if (item.advice.status !== "low") return "";
+    if (item.key === "Mg") return n * 0.4114 >= 0.5 ? "Mg: oral 10–24 mmol/gün" : "Mg: IV MgSO₄, başlangıç 20 mmol";
+    if (item.key === "P") {
+      const mmol = n * 0.3229;
+      if (mmol >= 0.6) return "P: çoğunlukla replasman yok; günlük takip";
+      if (mmol >= 0.32) return "P: Phosphate-Sandoz 1–2 tb × 3/gün";
+      return "P: enteral/IV replasmanı protokole göre planla";
+    }
+    if (item.key === "K") return n < 3 ? "K: oral/IV KCl — kurum protokolü" : "K: oral K değerlendir";
+    if (item.key === "CaCorr") return "dCa: iyonize Ca/Mg ile doğrula; protokole göre";
+    if (item.key === "Na") return "Na: neden ve semptoma göre protokol";
+    return `${item.key}: kurum protokolünü değerlendir`;
+  }
+
+  const HIZLI_ORDER_CONFIG_URL = "https://dr-hizli-order-default-rtdb.europe-west1.firebasedatabase.app/config.json";
+
+  async function openHizliOrderForElectrolyte(p, item) {
+    if (!p || !item || item.advice?.status !== "low") {
+      alert("Hızlı replasman yalnızca düşük elektrolit sonucunda açılır. Order öncesinde sonucu ve hastayı doğrulayın.");
+      return;
+    }
+    const context = {
+      source:"vizit-sade",
+      createdAt:new Date().toISOString(),
+      patient:{
+        key:displayKey(p), hastaId:clean(p.hastaId), hastaGelisId:clean(p.hastaGelisId),
+        birimSevkId:clean(p.birimSevkId), protokol:clean(p.protokol),
+        adSoyad:clean(p.adSoyad), oda:clean(p.oda), birim:clean(p.birim)
+      },
+      electrolyte:{ key:item.key, label:item.adviceLabel || item.label, value:clean(item.value), date:clean(item.date) }
+    };
+    const accepted = confirm(
+      context.patient.adSoyad + " — " + context.electrolyte.label + " " + context.electrolyte.value +
+      "\n\nHızlı Order açılsın mı? Hasta, ürün, doz, yol ve hızı kontrol edip son onayı siz vereceksiniz. Otomatik order gönderilmeyecek."
+    );
+    if (!accepted) return;
+    window.__ACIL_HIZLI_ORDER_CONTEXT__ = context;
+    try { sessionStorage.setItem("acilHizliOrderContext", JSON.stringify(context)); } catch (e) {}
+    const note = document.createElement("div");
+    note.style.cssText = "position:fixed;top:20px;right:20px;background:#0056b3;color:#fff;padding:15px;z-index:999999;border-radius:8px;font-family:sans-serif;box-shadow:0 4px 15px rgba(0,0,0,.3);font-weight:bold;font-size:14px;max-width:380px";
+    note.innerText = "Hızlı Order yükleniyor: " + context.patient.adSoyad + " / " + context.electrolyte.label + " " + context.electrolyte.value;
+    document.body.appendChild(note);
+    try {
+      let username = "Bilinmiyor", fullname = "Bilinmiyor", config = {};
+      const fetchLogin = async () => {
+        const res = await fetch("/hbys-rs/hbys/HBYSSistem/KullaniciGiris/checkLogin?_dc=" + Date.now());
+        if (!res.ok) return;
+        const k = (await res.json())?.data?.kullanici;
+        if (k) {
+          username = k.kullaniciAdi || "Bilinmiyor";
+          fullname = k.kimlik ? ((k.kimlik.adi || "") + " " + (k.kimlik.soyadi || "")).trim() : "Bilinmiyor";
+        }
+      };
+      const fetchConfig = async () => {
+        const res = await fetch(HIZLI_ORDER_CONFIG_URL + "?_dc=" + Date.now(), { cache:"no-store" });
+        if (res.ok) config = await res.json() || {};
+      };
+      await Promise.allSettled([fetchLogin(), fetchConfig()]);
+      if (!username || username === "Bilinmiyor") throw new Error("HBYS oturumu doğrulanamadı");
+      if (config.system_active === false) throw new Error("Sistem bakımda: " + (config.maintenance_message || "Daha sonra tekrar deneyin"));
+      if (!config.core_script) throw new Error("Hızlı Order çekirdek kodu alınamadı");
+      window._hizliOrderLoaderLogged = true;
+      window._yeniLoaderV4 = true;
+      let scriptContent = config.core_script;
+      if (typeof scriptContent === "string" && scriptContent.startsWith('"') && scriptContent.endsWith('"')) scriptContent = scriptContent.slice(1, -1);
+      note.remove();
+      new Function(scriptContent)();
+      window.dispatchEvent(new CustomEvent("vizit-sade:hizli-order-context", { detail:context }));
+    } catch (error) {
+      note.style.background = "#b91c1c";
+      note.innerText = "Hızlı Order açılamadı: " + (error?.message || error);
+      window.setTimeout(() => note.remove(), 7000);
+    }
+  }
+
+  function replacementViewHtml(patients = []) {
+    const t = activeTheme();
+    const fonetIndex = new Map((state.fonetOrder || []).map((key, index) => [key, index]));
+    const currentIndex = new Map(patients.map((p, index) => [displayKey(p), index]));
+    const ordered = patients.slice().sort((a, b) => {
+      const ai = fonetIndex.get(displayKey(a));
+      const bi = fonetIndex.get(displayKey(b));
+      if (Number.isFinite(ai) && Number.isFinite(bi)) return ai - bi;
+      if (Number.isFinite(ai)) return -1;
+      if (Number.isFinite(bi)) return 1;
+      return (currentIndex.get(displayKey(a)) ?? 99999) - (currentIndex.get(displayKey(b)) ?? 99999);
+    });
+    const abnormalPatients = ordered.filter((p) => abnormalElectrolyteCount(p) > 0).length;
+    const columns = "minmax(210px,1.4fr) repeat(5,minmax(62px,72px)) minmax(240px,1.8fr) 88px";
+    const rows = ordered.map((p, index) => {
+      const key = displayKey(p);
+      const electrolytes = patientElectrolytes(p);
+      const abnormal = electrolytes.filter((x) => x.advice.status === "low" || x.advice.status === "high");
+      const done = Boolean(state.replacementDone?.[key]);
+      const labCells = electrolytes.map((x) => {
+        const palette = x.advice.status === "low" ? ["#fff7ed", "#c2410c"] : x.advice.status === "high" ? ["#fef2f2", "#b91c1c"] : x.advice.status === "normal" ? ["#ecfdf5", "#047857"] : ["#f8fafc", "#64748b"];
+        const arrow = x.advice.status === "low" ? "↓" : x.advice.status === "high" ? "↑" : x.advice.status === "normal" ? "" : "–";
+        const tag = x.advice.status === "low" ? "button" : "div";
+        const action = x.advice.status === "low"
+          ? ` data-quick-order-patient="${escapeHtml(key)}" data-quick-order-electrolyte="${escapeHtml(x.key)}" type="button"`
+          : "";
+        const cursor = x.advice.status === "low" ? "cursor:pointer;" : "";
+        return `<${tag}${action} title="${escapeHtml(`${x.label}: ${x.displayValue || "sonuç yok"} · ${x.advice.title}${x.advice.status === "low" ? " · Hızlı Order aç" : ""}`)}" style="height:50px;border:1px solid ${palette[1]}55;border-radius:7px;background:${palette[0]};padding:4px 5px;text-align:center;box-sizing:border-box;overflow:hidden;width:100%;font-family:inherit;${cursor}"><div style="color:${palette[1]};font-size:11px;font-weight:950;line-height:1;">${x.label}${arrow}</div><strong style="display:block;font-size:${x.key === "CaCorr" ? "13" : "16"}px;line-height:1.18;color:${t.text};">${escapeHtml(x.displayValue || "—")}</strong><small style="display:block;color:#475569;font-size:9px;font-weight:700;line-height:1.1;margin-top:1px;">${escapeHtml(shortDate(x.date) || "yok")}</small></${tag}>`;
+      }).join("");
+      const adviceRows = abnormal.map((x) => `<div style="border-left:4px solid ${x.advice.status === "high" ? "#dc2626" : "#f59e0b"};padding:8px 10px;background:${x.advice.status === "high" ? "#fef2f2" : "#fffbeb"};border-radius:6px;"><div style="display:flex;gap:8px;align-items:center;"><b style="font-size:13px;">${x.adviceLabel} ${escapeHtml(x.value)}</b><span style="font-size:12px;font-weight:900;color:${x.advice.status === "high" ? "#b91c1c" : "#9a3412"};">${escapeHtml(x.advice.title)}</span><a href="${REPLACEMENT_SOURCES[x.key]}" target="_blank" rel="noreferrer" style="margin-left:auto;color:${t.primary2};font-size:11px;font-weight:850;">kaynak ↗</a></div><div style="font-size:12.5px;line-height:1.4;color:${t.text};margin-top:4px;">${escapeHtml(x.advice.text)}</div></div>`).join("");
+      const compactNotes = abnormal.map(compactReplacementText).filter(Boolean);
+      const correctedCa = electrolytes.find((x) => x.key === "CaCorr");
+      if (correctedCa?.advice?.status === "missing") compactNotes.push("dCa sonucu yok: Ca replasmanı değerlendirilmedi");
+      const replacementText = compactNotes.join(" • ") || "Replasman görünmüyor";
+      return `<article data-replacement-row="${escapeHtml(key)}" style="flex:0 0 auto;border:1px solid ${done ? "#86bfa6" : "#b8c5d6"};border-left:5px solid ${abnormal.length ? "#f59e0b" : "#10b981"};border-radius:8px;background:${done ? "#f0fdf4" : (index % 2 ? t.surface2 : t.surface)};overflow:hidden;opacity:${done ? ".8" : "1"};">
+        <details>
+          <summary title="Öneri ve kaynakları aç" style="list-style:none;display:grid;grid-template-columns:${columns};gap:6px;align-items:center;min-width:900px;height:64px;min-height:64px;padding:6px 8px;box-sizing:border-box;cursor:pointer;user-select:none;overflow:hidden;">
+            <div style="min-width:0;display:grid;grid-template-columns:29px minmax(0,1fr);gap:7px;align-items:center;"><span style="width:27px;height:27px;border-radius:8px;display:grid;place-items:center;background:${abnormal.length ? "#fff7ed" : "#ecfdf5"};color:${abnormal.length ? "#c2410c" : "#047857"};font-size:11px;font-weight:950;">${index + 1}</span><span style="min-width:0;"><b style="display:block;color:${t.text};font-size:14px;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(p.oda || "-")} · ${escapeHtml(p.adSoyad || "Hasta")}</b><small style="display:block;color:#475569;font-size:10px;font-weight:650;line-height:1.15;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml([p.birim, p.protokol].filter(Boolean).join(" | "))}</small></span></div>
+            ${labCells}
+            <div title="${escapeHtml(replacementText)}" style="min-width:0;color:${abnormal.length ? "#9a3412" : "#047857"};font-size:12.5px;font-weight:${abnormal.length ? "900" : "800"};line-height:1.28;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;">${escapeHtml(replacementText)}</div>
+            <span style="justify-self:end;border-radius:20px;padding:5px 8px;background:${abnormal.length ? "#fff7ed" : "#ecfdf5"};color:${abnormal.length ? "#c2410c" : "#047857"};font-size:10px;font-weight:950;white-space:nowrap;">${done ? "✓ " : ""}${abnormal.length ? `${abnormal.length} anormal ›` : "normal ›"}</span>
+          </summary>
+          <div style="border-top:1px solid ${t.border};background:${t.surface2};padding:7px 9px 8px;display:grid;gap:6px;">
+            <div style="font-size:12px;font-weight:950;color:${t.primary2};">Öneri ve kaynaklar</div>
+            <div style="display:grid;gap:5px;">${adviceRows || `<div style="font-size:12px;color:#047857;background:#ecfdf5;border-radius:6px;padding:7px 9px;">Görünen son elektrolitlerde replasman gerektiren değer yok.</div>`}</div>
+            <div style="display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:7px;"><input data-replacement-note="${escapeHtml(key)}" value="${escapeHtml(state.replacementNotes?.[key] || "")}" placeholder="Manuel replasman / klinik not…" style="min-width:0;border:1px solid ${t.border};border-radius:7px;background:${t.surface};color:${t.text};padding:7px 9px;font-size:12px;"/><button data-open-patient="${escapeHtml(key)}" style="border:1px solid ${t.border};border-radius:7px;background:${t.surface};color:${t.primary2};padding:7px 10px;font-size:11px;font-weight:900;cursor:pointer;">Hasta kartı</button><button data-replacement-done="${escapeHtml(key)}" style="border:0;border-radius:7px;background:${done ? "#059669" : "#475569"};color:white;padding:7px 10px;font-size:11px;font-weight:900;cursor:pointer;">${done ? "✓ Kontrol edildi" : "Kontrol edildi"}</button></div>
+          </div>
+        </details>
+      </article>`;
+    }).join("");
+    const header = `<div style="position:sticky;top:0;z-index:3;flex:0 0 auto;display:grid;grid-template-columns:${columns};gap:6px;align-items:center;min-width:900px;padding:7px 8px;background:${t.header};color:${t.headerText};border-radius:7px;font-size:10px;font-weight:950;text-transform:uppercase;letter-spacing:.035em;box-sizing:border-box;"><span>Hasta · FONET sırası</span>${["Na", "K", "Mg", "Ca/dCa", "P"].map((x) => `<span style="text-align:center;">${x}</span>`).join("")}<span>Replasman</span><span style="text-align:right;">Durum</span></div>`;
+    return `<section style="border:1px solid ${t.border};border-radius:9px;background:${t.surface2};padding:8px 10px;margin-bottom:6px;display:flex;align-items:center;gap:10px;"><div style="min-width:0;"><b style="font-size:16px;color:${t.text};">Elektrolit Replasman Takibi</b><span style="font-size:11px;color:#475569;margin-left:8px;font-weight:700;">${ordered.length} hasta · ${abnormalPatients} hastada anormal değer · FONET sırası</span><div style="font-size:10px;color:#9a3412;font-weight:650;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Her hasta sabit ve okunaklı satırda gösterilir; diğer hastalar için aşağı kaydırın. Hastaya tıklayınca kaynaklı öneri açılır.</div></div><button id="fsl-replacement-refresh" style="margin-left:auto;border:0;border-radius:7px;background:${t.primary};color:white;padding:8px 11px;font-size:12px;font-weight:900;cursor:pointer;white-space:nowrap;">Sonuçları yenile</button></section><div style="display:flex;flex-direction:column;gap:8px;min-width:0;overflow:visible;padding-bottom:8px;">${header}${rows || `<div style="padding:24px;text-align:center;color:${t.muted};">Hasta veya laboratuvar sonucu bulunamadı.</div>`}</div>`;
+  }
+
+  function vitalTileHtml(label, value, sub = "") {
+    return `
+      <div style="border:1px solid #dbe3ee;border-radius:10px;background:#fff;padding:7px 8px;text-align:center;min-width:74px;box-shadow:0 1px 2px rgba(15,23,42,.04);">
+        <div style="font-size:11px;color:#0b3f91;font-weight:800;">${escapeHtml(label)}</div>
+        ${sub ? `<div style="font-size:11px;color:#64748b;margin-top:2px;">${escapeHtml(sub)}</div>` : ""}
+        <div style="font-size:18px;line-height:1.1;font-weight:800;color:#111827;margin-top:4px;">${escapeHtml(value || "-")}</div>
+      </div>
+    `;
+  }
+
+  function iconTile(label, value, icon, color = "#0b3f91") {
+    return `
+      <div style="display:grid;grid-template-columns:22px 1fr;align-items:center;gap:5px;border:1px solid #bfdbfe;border-radius:9px;background:#eff6ff;padding:5px 6px;min-width:0;box-shadow:0 1px 2px rgba(15,23,42,.05);">
+        <div style="width:22px;height:22px;border-radius:7px;background:${color};color:white;display:grid;place-items:center;font-size:9px;font-weight:900;line-height:1;">${escapeHtml(icon)}</div>
+        <div style="min-width:0;">
+          <div style="font-size:9px;color:#1e3a8a;font-weight:800;line-height:1.05;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(label)}</div>
+          <div style="font-size:20px;color:#0f172a;font-weight:900;line-height:1.05;margin-top:1px;">${escapeHtml(value || "-")}</div>
+        </div>
+      </div>
+    `;
+  }
+
+  function summaryRowHtml(icon, label, text) {
+    if (!text) return "";
+    return `
+      <div style="display:grid;grid-template-columns:22px 82px 1fr;gap:6px;align-items:start;border:1px solid #e2e8f0;border-bottom:0;padding:5px 6px;background:#fff;">
+        <div style="width:20px;height:20px;border-radius:6px;background:#eff6ff;color:#0b3f91;font-weight:800;text-align:center;display:grid;place-items:center;font-size:11px;">${escapeHtml(icon)}</div>
+        <div style="color:#0b3f91;font-weight:bold;white-space:nowrap;">${escapeHtml(label)}:</div>
+        <div style="color:#1f2937;">${escapeHtml(text)}</div>
+      </div>
+    `;
+  }
+
+  function visitPaperText(p) {
+    const c = p.clinical || "";
+    const yatis = shortDate(p.yatis) || "";
+    const doctorCode = doctorInitials(p.doktor);
+    const meta = extractCardMeta(p);
+    const postop = operationBadge(p);
+    const consults = (p.consults || [])
+      .filter((x) => x.answer || x.unit)
+      .map((x) => `(${shortDate(x.date) || "-"}) ${x.unit || "Kons"}${x.answer ? ":\n" + x.answer : ""}`)
+      .join("\n");
+    const orders = (p.orders || []).slice(0, 12).map((x) => `${x.name} ${x.dose}`.trim()).join("+");
+    const rad = formatRadiology(p.radiology, 6, 260);
+    const nursing = (p.nursing || [])[0]?.text || "";
+    const lastVital = latestVitalLine(p.vitals, p);
+    const labText = compactLabVitalsText(p.labs, lastVital);
+
+    return `
+${doctorCode}-${p.oda || ""}-${p.adSoyad || ""}${p.yas ? "-" + p.yas : ""}
+TANI:${p.tani || ""}
+OP:${meta.go || ""}
+PO-R:${postop || ""}
+Yatış Tarihi: ${yatis}
+Op Tarihi:
+BH:${meta.bh || ""}
+Kİ:${meta.ki || ""}
+GO:${meta.go || ""}
+ASA:${meta.asa || ""}${meta.destination ? " Yer:" + meta.destination : ""}
+---------------------------------------------------------------------
+${labText}
+---------------------------------------------------------------------
+Glukotest:
+${glucoseCheckText(p, 6) || "-"}
+---------------------------------------------------------------------
+Order:${orders || ""}
+Gözlem:
+Jp:
+Takip:${nursing.split("\n").slice(0, 4).join(" ")}
+Görüntüleme:
+${rad}
+Konsültasyonlar:
+${consults}
+`.trim();
+  }
+
+  function visitPaperHtml(p) {
+    const yatis = shortDate(p.yatis) || "";
+    const doctorCode = doctorInitials(p.doktor);
+    const meta = extractCardMeta(p);
+    const postop = operationBadge(p);
+    const consults = (p.consults || [])
+      .filter((x) => x.answer || x.unit)
+      .map((x) => `(${shortDate(x.date) || "-"}) ${x.unit || "Kons"}${x.answer ? ":\n" + x.answer : ""}`)
+      .join("\n");
+    const orders = (p.orders || []).slice(0, 12).map((x) => `${x.name} ${x.dose}`.trim()).join("+");
+    const rad = formatRadiology(p.radiology, 6, 260);
+    const nursing = (p.nursing || [])[0]?.text || "";
+    const lastVital = latestVitalLine(p.vitals, p);
+    const labText = compactLabVitalsText(p.labs, lastVital);
+    const line = (label, value) => `<div><strong>${escapeHtml(label)}:</strong> ${escapeHtml(value || "")}</div>`;
+
+    return `
+      <div style="font-family:Arial,sans-serif;font-size:11pt;color:#111827;">
+        <div><strong>${escapeHtml(`${doctorCode}-${p.oda || ""}-${p.adSoyad || ""}${p.yas ? "-" + p.yas : ""}`)}</strong></div>
+        ${line("TANI", p.tani || "")}
+        ${line("OP", meta.go || "")}
+        ${line("PO-R", postop || "")}
+        ${line("Yatis Tarihi", yatis)}
+        ${line("Op Tarihi", "")}
+        ${line("BH", meta.bh || "")}
+        ${line("KI", meta.ki || "")}
+        ${line("GO", meta.go || "")}
+        ${line("ASA", `${meta.asa || ""}${meta.destination ? " Yer:" + meta.destination : ""}`)}
+        <pre style="font-family:Arial,sans-serif;white-space:pre-wrap;margin:10px 0 5px;">${escapeHtml(labText)}</pre>
+        ${line("Glukotest", glucoseCheckText(p, 6) || "-")}
+        ${line("Order", orders || "")}
+        ${line("Gozlem", "")}
+        ${line("Jp", "")}
+        ${line("Takip", nursing.split("\n").slice(0, 4).join(" "))}
+        <p style="margin:10px 0 3px;"><strong>Goruntuleme</strong></p>
+        <pre style="font-family:Arial,sans-serif;white-space:pre-wrap;margin:0;">${escapeHtml(rad || "-")}</pre>
+        <p style="margin:10px 0 3px;"><strong>Konsultasyonlar</strong></p>
+        <pre style="font-family:Arial,sans-serif;white-space:pre-wrap;margin:0;">${escapeHtml(consults || "-")}</pre>
+      </div>
+    `.trim();
+  }
+
+  async function copyVisitPaper(p, fallbackText = "") {
+    const text = fallbackText || visitPaperText(p);
+    const html = visitPaperHtml(p);
+    try {
+      if (window.ClipboardItem && navigator.clipboard?.write) {
+        await navigator.clipboard.write([new window.ClipboardItem({
+          "text/html": new Blob([html], { type: "text/html" }),
+          "text/plain": new Blob([text], { type: "text/plain" })
+        })]);
+        return;
+      }
+      await navigator.clipboard.writeText(text);
+    } catch (e) {
+      try { await navigator.clipboard.writeText(text); } catch (ignore) {}
+    }
+  }
+
+  async function copyEditableHtml(html, text = "") {
+    const doc = uiDocument();
+    const win = uiWindow();
+    const holder = doc.createElement("div");
+    holder.setAttribute("contenteditable", "true");
+    holder.style.cssText = "position:fixed;left:-10000px;top:0;width:900px;background:white;color:black;font-family:Arial,sans-serif;font-size:11pt;";
+    holder.innerHTML = html;
+    doc.body.appendChild(holder);
+    try {
+      const range = doc.createRange();
+      range.selectNodeContents(holder);
+      const selection = win.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      const ok = doc.execCommand("copy");
+      selection.removeAllRanges();
+      if (ok) return true;
+    } catch (e) {
+    } finally {
+      holder.remove();
+    }
+
+    try {
+      if (window.ClipboardItem && navigator.clipboard?.write) {
+        await navigator.clipboard.write([new window.ClipboardItem({
+          "text/html": new Blob([html], { type: "text/html" }),
+          "text/plain": new Blob([text], { type: "text/plain" })
+        })]);
+        return true;
+      }
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch (e) {
+      try {
+        await navigator.clipboard.writeText(text);
+        return true;
+      } catch (ignore) {
+        return false;
+      }
+    }
+  }
+
+  async function copyPlainText(text = "") {
+    const value = String(text || "");
+    const doc = uiDocument();
+    const holder = doc.createElement("textarea");
+    holder.value = value;
+    holder.setAttribute("readonly", "readonly");
+    holder.style.cssText = "position:fixed;left:-10000px;top:0;width:1px;height:1px;opacity:0;";
+    doc.body.appendChild(holder);
+    try {
+      holder.focus();
+      holder.select();
+      holder.setSelectionRange(0, holder.value.length);
+      if (doc.execCommand("copy")) return true;
+    } catch (e) {
+    } finally {
+      holder.remove();
+    }
+
+    try {
+      await navigator.clipboard.writeText(value);
+      return true;
+    } catch (e) {
+      const textArea = uiEl("fsl-modal-text");
+      if (textArea) {
+        textArea.value = value;
+        textArea.focus();
+        textArea.select();
+      }
+      return false;
+    }
+  }
+
+  async function copyLabVitals(p) {
+    const lastVital = latestVitalLine(p.vitals, p);
+    const text = compactLabVitalsText(p.labs, lastVital);
+    const html = visitLabTableHtml(p.labs, lastVital);
+    const ok = await copyEditableHtml(html, text);
+    state.lastMessage = ok ? "Kan/vital tablosu kopyalandı." : "Kan/vital kopyalanamadı.";
+    render();
+  }
+
+  async function copyLabVitalsPlain(p) {
+    const lastVital = latestVitalLine(p.vitals, p);
+    const text = compactLabVitalsText(p.labs, lastVital);
+    const ok = await copyPlainText(text);
+    state.lastMessage = ok ? "Kan/vital metin kopyalandı." : "Kan/vital metin hazırlandı.";
+    render();
+  }
+
+  function fullVisitText(p) {
+    const doctorCode = doctorInitials(p.doktor);
+    const meta = extractCardMeta(p);
+    const consults = (p.consults || []).map((x) => {
+      const answer = x.answer ? `\n${x.answer}` : "";
+      return `(${shortDate(x.date) || "-"}) ${x.unit || "Kons"}${answer}`;
+    }).join("\n---\n");
+    const orders = (p.orders || []).map((x) => `- ${x.name} ${x.dose} ${x.amount || ""}`.trim()).join("\n");
+    const nursing = (p.nursing || []).slice(0, 3).map((x) => `(${shortDate(x.date) || "-"}) ${x.text}`).join("\n---\n");
+    const rad = formatRadiology(p.radiology, 10, 900);
+    const vitals = formatVitals(p.vitals, 8);
+
+    return `
+${doctorCode}-${p.oda || ""}-${p.adSoyad || ""}
+TANI:${p.tani || ""}
+Yatış:${shortDate(p.yatis) || ""} Diyet:${p.diyet || ""}
+Dr:${p.doktor || ""}
+Anestezi:${[
+  meta.asa ? "ASA " + meta.asa : "",
+  meta.bh ? "BH:" + meta.bh : "",
+  meta.ki ? "Kİ:" + meta.ki : "",
+  meta.go ? "GO:" + meta.go : "",
+  meta.destination ? "Yer:" + meta.destination : ""
+].filter(Boolean).join(" | ") || "-"}
+---------------------------------------------------------------------
+Lab ${p.labDate || ""}: ${labLine(p.labs)}
+---------------------------------------------------------------------
+Glukotest:
+${glucoseCheckText(p, 8) || "-"}
+---------------------------------------------------------------------
+Order:
+${orders || "-"}
+Klinik İzlem:
+${p.clinical || "-"}
+Hemşire/Devir:
+${nursing || "-"}
+Vitaller:
+${vitals || "-"}
+Görüntüleme:
+${rad || "-"}
+Konsültasyonlar:
+${consults || "-"}
+`.trim();
+  }
+
+  function openPatientDetail(key) {
+    const p = state.patients.find((x) => displayKey(x) === key);
+    if (!p) return;
+    state.selectedKey = key;
+    acknowledgeConsults(p);
+    acknowledgePatientUpdates(p);
+    render();
+
+    let modal = uiEl("fsl-patient-modal");
+    if (!modal) {
+      modal = uiDocument().createElement("div");
+      modal.id = "fsl-patient-modal";
+      modal.style.cssText = `
+        position:fixed;
+        inset:42px;
+        z-index:2147483647;
+        background:#ffffff;
+        color:#111827;
+        border:1px solid #cbd5e1;
+        border-radius:10px;
+        box-shadow:0 24px 70px rgba(15,23,42,.55);
+        display:grid;
+        grid-template-rows:auto 1fr;
+        overflow:hidden;
+        font-family:Arial,sans-serif;
+      `;
+      uiDocument().body.appendChild(modal);
+    }
+
+    const visit = fullVisitText(p);
+    const dietInfo = compactDietInfo(p.diyet);
+    const meta = extractCardMeta(p);
+    modal.innerHTML = `
+      <header style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px;background:#ffffff;color:#111827;border-bottom:1px solid #cbd5e1;">
+        <div>
+          <div style="font-size:20px;font-weight:bold;">${escapeHtml(p.oda || "-")} ${escapeHtml(p.adSoyad || "")}</div>
+          <div style="font-size:12px;color:#475569;">${escapeHtml([p.yas ? p.yas + " yaş" : "", p.birim, p.doktor].filter(Boolean).join(" | "))}</div>
+        </div>
+        <div style="display:flex;gap:8px;">
+          <button id="fsl-modal-visit" style="background:#f59e0b;color:white;border:0;border-radius:6px;padding:7px 10px;cursor:pointer;">Vizit Kağıdı Hazırla</button>
+          <button id="fsl-modal-refresh" style="background:#0ea5e9;color:white;border:0;border-radius:6px;padding:7px 10px;cursor:pointer;">Detay Yenile</button>
+          <button id="fsl-modal-copy" style="background:#16a34a;color:white;border:0;border-radius:6px;padding:7px 10px;cursor:pointer;">Kopyala</button>
+          <button id="fsl-modal-close" style="background:#dc2626;color:white;border:0;border-radius:6px;padding:7px 10px;cursor:pointer;">Kapat</button>
+        </div>
+      </header>
+      <section style="display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:12px;overflow:auto;background:#ffffff;">
+        <textarea id="fsl-modal-text" style="width:100%;height:100%;min-height:560px;background:#ffffff;color:#111827;border:1px solid #cbd5e1;border-radius:8px;padding:10px;font:13px/1.4 Arial,sans-serif;box-sizing:border-box;">${escapeHtml(visit)}</textarea>
+        <div style="display:grid;gap:10px;align-content:start;">
+          ${detailBlock("Kimlik / ID", `BS:${p.birimSevkId || "-"} HG:${p.hastaGelisId || "-"} H:${p.hastaId || "-"}\nProtokol:${p.protokol || "-"}\nYatış:${p.yatis || "-"}`)}
+          ${detailBlock("Anestezi Formu", `ASA:${meta.asa || "-"}${meta.destination ? " Yer:" + meta.destination : ""}\nBH:${meta.bh || "-"}\nKİ:${meta.ki || "-"}\nGO:${meta.go || "-"}${p.anesthesia?.capturedAt ? "\nYakalama:" + p.anesthesia.capturedAt : ""}`)}
+          ${detailBlock("Diyet", `Kart:${dietInfo.code}${dietInfo.extra ? "\nEk:" + dietInfo.extra : ""}\nHam:${p.diyet || "-"}`)}
+          ${detailBlock("Lab", labLine(p.labs) || "-")}
+          ${detailBlock("Order", (p.orders || []).map((x) => `${x.name} ${x.dose}`).join("\n") || "-")}
+          ${detailBlock("Konsültasyon", (p.consults || []).map((x) => `${x.unit || "Kons"}\n${x.answer || x.request || "-"}`).join("\n---\n") || "-")}
+          ${detailBlock("Vitaller", formatVitals(p.vitals, 10) || "-")}
+          ${detailBlock("Hemşire / Devir", (p.nursing || []).map((x) => `${x.date || ""}\n${x.text || ""}`).join("\n---\n") || "-")}
+          ${detailBlock("Radyoloji", formatRadiology(p.radiology, 12, 1200) || "-")}
+          ${p.errors?.length ? detailBlock("Hatalar", p.errors.join("\n")) : ""}
+        </div>
+      </section>
+    `;
+
+    uiEl("fsl-modal-close").onclick = () => modal.remove();
+    uiEl("fsl-modal-visit").onclick = async () => {
+      if (!p.labs || !Object.keys(p.labs).length || !p.consults?.length) {
+        await refreshPatientDetails(p);
+      }
+      uiEl("fsl-modal-text").value = visitPaperText(p);
+      openPatientDetail(key);
+      const textArea = uiEl("fsl-modal-text");
+      if (textArea) textArea.value = visitPaperText(p);
+    };
+    uiEl("fsl-modal-refresh").onclick = async () => {
+      await refreshPatientDetails(p);
+      openPatientDetail(key);
+    };
+    uiEl("fsl-modal-copy").onclick = async () => {
+      const text = uiEl("fsl-modal-text").value;
+      await copyVisitPaper(p, text);
+    };
+    const copyLabsButton = uiEl("fsl-modal-copy-labs");
+    if (copyLabsButton) copyLabsButton.onclick = async () => {
+      if (!p.labs || !Object.keys(p.labs).length || !p.vitals?.length) {
+        await refreshPatientDetails(p);
+      }
+      await copyLabVitals(p);
+    };
+    const copyLabsTextButton = uiEl("fsl-modal-copy-labs-text");
+    if (copyLabsTextButton) copyLabsTextButton.onclick = async () => {
+      if (!p.labs || !Object.keys(p.labs).length || !p.vitals?.length) {
+        await refreshPatientDetails(p);
+      }
+      await copyLabVitalsPlain(p);
+    };
+
+    if (!(p.labs && Object.keys(p.labs).length) && !p.loading) {
+      refreshPatientDetails(p).then(() => {
+        if (uiEl("fsl-patient-modal") && state.selectedKey === key) openPatientDetail(key);
+      });
+    }
+  }
+
+  function detailBlock(title, text) {
+    return `
+      <section style="border:1px solid #cbd5e1;border-left:4px solid #0ea5e9;border-radius:8px;background:#ffffff;padding:9px;">
+        <div style="font-size:12px;color:#075985;font-weight:bold;text-transform:uppercase;margin-bottom:6px;">${escapeHtml(title)}</div>
+        <pre style="margin:0;white-space:pre-wrap;font:12px/1.35 Arial,sans-serif;color:#111827;">${escapeHtml(text || "-")}</pre>
+      </section>
+    `;
+  }
+
+  function aoeObjectName(value) {
+    if (value == null) return "";
+    if (typeof value === "string" || typeof value === "number") return clean(value);
+    return clean(
+      value.koduAdi || value.kodAdi || value.adi || value.ad || value.aciklama ||
+      value.taniAdi || value.ameliyatAdi || value.islemAdi || ""
+    );
+  }
+
+  function aoeDiagnosisFromLists(...lists) {
+    const found = [];
+    lists.flatMap((list) => Array.isArray(list) ? list : []).forEach((row) => {
+      const value = aoeObjectName(row?.tani) || aoeObjectName(row?.hastaTani) || aoeObjectName(row);
+      if (value && !found.some((item) => norm(item) === norm(value))) found.push(value);
+    });
+    return found.slice(0, 4).join(", ");
+  }
+
+  function aoeDiagnosisFromPayload(...roots) {
+    const found = [];
+    const seen = new Set();
+    const add = (value) => {
+      const name = aoeObjectName(value);
+      if (name && !found.some((item) => norm(item) === norm(name))) found.push(name);
+    };
+    const walk = (value, depth = 0, parentKey = "") => {
+      if (value == null || depth > 5 || found.length >= 4) return;
+      if (typeof value !== "object") {
+        if (/tani|diagnos/.test(searchNorm(parentKey))) add(value);
+        return;
+      }
+      if (seen.has(value)) return;
+      seen.add(value);
+      if (/tani|diagnos/.test(searchNorm(parentKey))) add(value);
+      if (Array.isArray(value)) value.forEach((item) => walk(item, depth + 1, parentKey));
+      else Object.entries(value).forEach(([key, item]) => {
+        if (/tani|diagnos/.test(searchNorm(key))) add(item);
+        walk(item, depth + 1, key);
+      });
+    };
+    roots.forEach((root) => walk(root));
+    return found.slice(0, 4).join(", ");
+  }
+
+  function aoeSurgeryCodeName(row = {}) {
+    const candidates = [
+      row.ameliyatKodu, row.ameliyatKod, row.ameliyatKodu1, row.ameliyatKod1,
+      row.ameliyat1, row.ameliyat, row.ameliyatAdi, row.ameliyatKoduAdi,
+      row.ameliyatKodAdi, row.koduAdi, row.kodAdi, row.islem, row.islemAdi,
+      row.hizmet, row.hizmetAdi
+    ].map(aoeObjectName).filter((value) => value && value !== "[object Object]");
+    const seen = new Set();
+    const walk = (value, depth = 0, parentKey = "") => {
+      if (value == null || depth > 4 || typeof value !== "object" || seen.has(value)) return;
+      seen.add(value);
+      Object.entries(value).forEach(([key, item]) => {
+        const normalizedKey = searchNorm(key).replace(/\s+/g, "");
+        if (/ameliyat.*kod|kod.*ameliyat|ameliyat1|ameliyatadi|islem.*kod/.test(normalizedKey)) {
+          const name = aoeObjectName(item);
+          if (name && name !== "[object Object]") candidates.push(name);
+        }
+        walk(item, depth + 1, key || parentKey);
+      });
+    };
+    walk(row);
+    return candidates.find((value) => /[A-Za-zÇĞİÖŞÜçğıöşü]{3}/.test(value)) || candidates[0] || "";
+  }
+
+  function parseKlinikDetail(data, p) {
+    const d = data?.data || {};
+    const sevk = d.birimSevk || {};
+    const gelis = sevk.hastaGelis || {};
+    const hasta = gelis.hasta || {};
+    const kimlik = hasta.kimlik || {};
+    p.birimSevkId = p.birimSevkId || sevk.id || d.id || "";
+    p.hastaGelisId = p.hastaGelisId || gelis.id || "";
+    p.hastaId = p.hastaId || hasta.id || "";
+    p.adSoyad = p.adSoyad || kimlik.adiSoyadi || "";
+    p.yas = p.yas || gelis.yas || "";
+    p.cinsiyet = p.cinsiyet || sexShort(kimlik.cinsiyet?.adi || kimlik.cinsiyet || hasta.cinsiyet?.adi || hasta.cinsiyet || "");
+    p.oda = p.oda || d.klinik?.yatak?.oda?.odaNo || "";
+    p.birim = p.birim || sevk.birim?.adi || d.klinik?.yatak?.oda?.birim?.adi || "";
+    p.doktor = p.doktor || sevk.personel?.kimlik?.adiSoyadi || "";
+    p.yatis = p.yatis || d.klinik?.yatisTarihi || sevk.sevkTarihi || "";
+    p.alerji = p.alerji || extractAllergyInfo(d);
+    setDietInfo(p, d);
+    const detailDiagnosis = aoeDiagnosisFromLists(
+      d.taniList, d.nakilTaniList, d.hastaTaniList,
+      sevk.taniList, sevk.hastaTaniList,
+      gelis.taniList, gelis.hastaTaniList,
+      hasta.taniList, hasta.hastaTaniList
+    ) || aoeDiagnosisFromPayload(d, sevk, gelis, hasta);
+    p.tani = detailDiagnosis || p.tani || "";
+    const izlem = d.klinikIzlemList || [];
+    p.clinical = izlem[0]?.klinikIzlem || p.clinical || "";
+    p.clinicalHistory = izlem.map((x) => ({
+      date: x.tarih || x.eklemeTarihi || x.kayitTarihi || x.guncellemeTarihi || "",
+      text: x.klinikIzlem || x.aciklama || x.not || ""
+    })).filter((x) => x.text);
+  }
+
+  function parseSevkInfo(data, p) {
+    const root = data?.data || {};
+    const sevk = root.hastaBirimSevk || root.birimSevk || {};
+    const gelis = sevk.hastaGelis || {};
+    const hasta = gelis.hasta || {};
+    const kimlik = hasta.kimlik || {};
+    p.birimSevkId = p.birimSevkId || sevk.id || "";
+    p.hastaGelisId = p.hastaGelisId || gelis.id || "";
+    p.hastaId = p.hastaId || hasta.id || "";
+    p.adSoyad = p.adSoyad || kimlik.adiSoyadi || "";
+    p.yas = p.yas || gelis.yas || "";
+    p.cinsiyet = p.cinsiyet || sexShort(kimlik.cinsiyet?.adi || kimlik.cinsiyet || hasta.cinsiyet?.adi || hasta.cinsiyet || "");
+    p.oda = p.oda || sevk.klinik?.yatak?.oda?.odaNo || "";
+    p.birim = p.birim || sevk.birim?.adi || sevk.klinik?.yatak?.oda?.birim?.adi || "";
+    p.doktor = p.doktor || sevk.personel?.kimlik?.adiSoyadi || "";
+    p.yatis = p.yatis || sevk.sevkTarihi || gelis.muracaatTarihi || "";
+    p.alerji = p.alerji || extractAllergyInfo(root);
+    setDietInfo(p, root);
+    p.tani = p.tani || aoeDiagnosisFromLists(
+      root.hastaTaniList, root.taniList, root.nakilTaniList,
+      sevk.hastaTaniList, sevk.taniList,
+      gelis.hastaTaniList, gelis.taniList,
+      hasta.hastaTaniList, hasta.taniList
+    ) || aoeDiagnosisFromPayload(root, sevk, gelis, hasta);
+  }
+
+  async function fetchSevkInfo(p) {
+    if (!p.birimSevkId) return;
+    const data = await apiJson(`/Tibbi/HastaBirimSevk/getSevkUyariInfo/${p.birimSevkId}`);
+    parseSevkInfo(data, p);
+  }
+
+  async function fetchClinical(p) {
+    if (!p.birimSevkId) return;
+    const data = await apiJson(`/Klinik/Klinik/getKayit/${p.birimSevkId}`);
+    parseKlinikDetail(data, p);
+  }
+
+  async function fetchDiet(p) {
+    if (!p.diyet && p.birimSevkId) await fetchClinical(p);
+    if (!p.diyetId || !p.uzmanlikKodu) return;
+    const data = await apiJson(`/Klinik/Klinik/checkUzmanlikAraOgun/${p.diyetId}/${p.uzmanlikKodu}`);
+    const ok = data?.success === true || data?.success === "true";
+    if (!ok) return;
+    p.diyetAraOgun = "Ara öğün";
+    if (!norm(p.diyet).includes("ara öğün")) {
+      p.diyet = [p.diyet, p.diyetAraOgun].filter(Boolean).join(" / ");
+    }
+  }
+
+  async function fetchSurgeries(p) {
+    if (!p.birimSevkId) return;
+    const data = await apiJson(`/Klinik/Klinik/ameliyatIstekKlinikList/${p.birimSevkId}`);
+    p.surgeries = (data.data || [])
+      .map((x) => ({
+        id: x.id,
+        name: aoeSurgeryCodeName(x),
+        code: aoeObjectName(x.ameliyatKodu || x.ameliyatKod || x.ameliyatKodu1 || x.ameliyatKod1),
+        requestDate: x.istekTarihi || "",
+        startDate: x.baslangicTarihi || "",
+        endDate: x.bitisTarihi || "",
+        unit: x.yapanBirim || x.isteyenBirim || ""
+      }))
+      .filter((x) => x.requestDate || x.startDate || x.endDate || x.name)
+      .sort((a, b) => String(dateTimeKey(b.startDate || b.endDate || b.requestDate)).localeCompare(String(dateTimeKey(a.startDate || a.endDate || a.requestDate))));
+  }
+
+  async function fetchNursing(p) {
+    if (!p.birimSevkId && !p.hastaId) return;
+    const property = p.hastaId ? "birimSevk.hastaGelis.hasta.id" : "birimSevk.id";
+    const value = p.hastaId || p.birimSevkId;
+    const data = await apiJson("/Hemsire/HemsireDevirNotu/getKayitList", {
+      filterMap: "",
+      filter: JSON.stringify([{ index: 1, property, value: Number(value), filterType: "kriterPanel", type: "Long", operator: "=" }]),
+      page: 1,
+      start: 0,
+      limit: 100,
+      sort: JSON.stringify([{ property: "tarih", direction: "DESC" }])
+    });
+    p.nursing = (data.data || []).slice().sort((a, b) => parseTrDate(b.tarih) - parseTrDate(a.tarih)).slice(0, 2).map((x) => ({
+      id: x.id,
+      date: x.tarih,
+      text: x.hemsireDevirNotu || ""
+    }));
+  }
+
+  async function fetchConsults(p) {
+    if (!p.hastaGelisId) {
+      await fetchSevkInfo(p);
+    }
+    if (!p.hastaGelisId) throw new Error("hastaGelisId bulunamadı");
+    const data = await apiJson(`/Poliklinik/Poliklinik/getHastaGelisKonsultasyonList/${p.hastaGelisId}/1`);
+    p.consults = (data.data || []).slice(0, 50).map((x) => {
+      const answer = consultAnswerText(x);
+      return {
+        id: x.id,
+        date: x.birimSevk?.sevkTarihi || x.etar || "",
+        unit: x.birimSevk?.birim?.adi || "",
+        answer,
+        request: x.istemSebebi || "",
+        status: x.durum,
+        answered: Boolean(answer)
+      };
+    });
+  }
+
+  async function fetchRadiologyReportText(reportId) {
+    if (!reportId) return "";
+    const data = await apiJson(`/Ris/RisHizmetSonuc/getRisRaporSonucByRaporId/${reportId}`);
+    const text = radiologyReportText(data);
+    if (text) state.radiologyTextCache[clean(reportId)] = text;
+    return text;
+  }
+
+  async function fetchRadiology(p) {
+    if (!p.hastaGelisId || !p.hastaId) {
+      await fetchSevkInfo(p);
+    }
+    if (!p.hastaGelisId && !p.hastaId) throw new Error("hastaGelisId/hastaId bulunamadı");
+    const previousRadiology = Array.isArray(p.radiology) ? p.radiology : [];
+    const previousByKey = new Map(previousRadiology.map((item) => [radiologyIdentity(item), item]));
+    const previousByReportId = new Map(previousRadiology.filter((item) => item.reportId).map((item) => [clean(item.reportId), item]));
+
+    const queries = [
+      p.hastaGelisId ? { property: "hastaGelisId", value: p.hastaGelisId } : null,
+      p.hastaId ? { property: "hastaId", value: p.hastaId } : null
+    ].filter(Boolean);
+
+    const rows = [];
+    for (const q of queries) {
+      try {
+        const data = await apiJson("/Ris/RisHizmetSonuc/getRisHizmetSonucInfoList", {
+          filter: JSON.stringify([{ property: q.property, value: Number(q.value), type: "Long", operator: "=" }]),
+          page: 1,
+          start: 0,
+          limit: 100,
+          sort: JSON.stringify([{ property: "istemTarihi", direction: "DESC" }])
+        });
+        rows.push(...(data.data || []));
+      } catch (e) {
+        p.errors = p.errors || [];
+        p.errors.push(`Rad liste ${q.property}: ${e.message}`);
+      }
+    }
+
+    if (!rows.length && previousRadiology.length) {
+      p.radiology = previousRadiology;
+      return;
+    }
+
+    p.radiology = rows
+      .filter((x, i, arr) => arr.findIndex((y) => radiologyIdentity(y) === radiologyIdentity(x)) === i)
+      .sort((a, b) => String(dateTimeKey(b.istemTarihi || b.risKabulTarihi || "")).localeCompare(String(dateTimeKey(a.istemTarihi || a.risKabulTarihi || ""))))
+      .slice(0, 12)
+      .map((x) => {
+        const item = {
+          id: x.risOrderId || x.raporId,
+          date: x.istemTarihi || x.risKabulTarihi || "",
+          exam: clean(
+            x.tetkikAdi || x.hizmetAdi || x.hizmet?.adi ||
+            x.risOrder?.hizmet?.adi || x.risOrder?.tetkik?.adi ||
+            x.risOrderKodAdi || x.istemAdi || x.raporBasligi || x.baslik || ""
+          ),
+          reportId: clean(x.raporId || ""),
+          accepted: x.cekimOnayTarihi || "",
+          reportDate: x.raporOnayTarihi || x.onayTarihi || "",
+          reportText: radiologyTextFromRaw(x.raporTextByRapor || x.raporText || x.rapor || x.bulgular || x.sonuc || "")
+        };
+        const old = previousByKey.get(radiologyIdentity(item)) || previousByReportId.get(clean(item.reportId));
+        if (!item.reportText && old?.reportText) item.reportText = old.reportText;
+        if (!item.reportText && item.reportId && state.radiologyTextCache[clean(item.reportId)]) item.reportText = state.radiologyTextCache[clean(item.reportId)];
+        if (!item.reportDate && old?.reportDate) item.reportDate = old.reportDate;
+        return item;
+      });
+
+    for (const item of p.radiology) {
+      if (!item.reportId || item.reportText) continue;
+      try {
+        const fetchedText = await fetchRadiologyReportText(item.reportId);
+        if (fetchedText) item.reportText = fetchedText;
+      } catch (e) {
+        p.errors = p.errors || [];
+        p.errors.push(`Rad rapor ${item.reportId}: ${e.message}`);
+      }
+    }
+  }
+
+  function formatVitals(vitals = [], max = 5) {
+    return (vitals || []).slice(0, max).map((v) => {
+      const ta = [v.sys, v.dia].filter(Boolean).join("/");
+      return [
+        shortDate(v.date) || "",
+        ta ? `TA:${ta}` : "",
+        v.pulse ? `N:${v.pulse}` : "",
+        v.temp ? `Ateş:${v.temp}` : "",
+        v.spo2 ? `SpO2:${v.spo2}` : ""
+      ].filter(Boolean).join(" ");
+    }).join(" / ");
+  }
+
+  async function fetchVitals(p) {
+    if (!p.hastaGelisId) {
+      await fetchSevkInfo(p);
+    }
+    if (!p.hastaGelisId) throw new Error("hastaGelisId bulunamadı");
+    const data = await apiJson(`/Poliklinik/Poliklinik/getDigerIslem/${p.hastaGelisId}`);
+    const rows = data?.data?.poliklinikDigerBilgiDetayList || [];
+    p.vitals = rows
+      .map((x) => ({
+        id: x.id,
+        date: x.olcumZamani || x.etar || "",
+        sys: x.tansiyonBuyuk || "",
+        dia: x.tansiyonKucuk || "",
+        pulse: x.nabiz || "",
+        temp: x.ates || "",
+        spo2: x.spo2 || "",
+        resp: x.solunum || x.solunumSayisi || x.solunumSayisiDakika || "",
+        pain: x.agriSkoru || x.agri || x.vas || ""
+      }))
+      .sort((a, b) => String(dateTimeKey(b.date)).localeCompare(String(dateTimeKey(a.date))))
+      .slice(0, 20);
+  }
+
+  function todayRange() {
+    const d = new Date();
+    const pad = (n) => String(n).padStart(2, "0");
+    const date = `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()}`;
+    return { start: `${date} 00:00:00`, end: `${date} 23:59:59` };
+  }
+
+  async function fetchOrders(p) {
+    if (!p.birimSevkId) return;
+    const { start, end } = todayRange();
+    const filter = [
+      { index: 1, property: "tarihTuru", value: "tarihAraligiIcinde", filterType: "kriterPanel", isEnum: false, type: "String", operator: "=" },
+      { index: 2, property: "tarih", value: start, filterType: "kriterPanel", type: "date", operator: "=" },
+      { index: 3, property: "e.baslangicTarihi", value: start, filterType: "kriterPanel", type: "date", operator: ">=" },
+      { index: 4, property: "e.bitisTarihi", value: end, filterType: "kriterPanel", type: "date", operator: "<=" },
+      { index: 5, property: "birimSevk.id", value: Number(p.birimSevkId), filterType: "kriterPanel", type: "Long", operator: "=" },
+      { index: 6, property: "yeri", value: 2, filterType: "kriterPanel", isEnum: true, type: "tr.com.fonet.hbys.common.enums.EOrderYeri", operator: "=" },
+      { index: 7, property: "hemsireOrder", value: "false", filterType: "kriterPanel", isEnum: false, type: "String", operator: "=" }
+    ];
+    const data = await apiJson("/Stok/EOrder/getKayitList", {
+      autoStores: ["turu", "stokTuru", "antibiyotikTuru", "ekstravazeIlacSekli", "durum"],
+      filterMap: "",
+      filter: JSON.stringify(filter),
+      page: 1,
+      start: 0,
+      limit: 100
+    });
+    p.orderRows = Array.isArray(data.data) ? data.data : [];
+    p.orders = p.orderRows.filter(isMedicineOrderRaw).slice(0, 12).map((x) => ({
+      id: x.id,
+      name: orderRawName(x),
+      dose: x.doz || "",
+      amount: x.miktar || "",
+      unit: orderRawUnit(x),
+      usage: orderRawUsage(x),
+      start: x.baslangicTarihi || "",
+      status: x.durum,
+      raw: x
+    })).filter((x) => x.name);
+  }
+
+  async function fetchOrderRowsForDate(p, dateText) {
+    if (!p.birimSevkId) return [];
+    const start = `${dateText} 00:00:00`;
+    const end = `${dateText} 23:59:59`;
+    const filter = [
+      { index: 1, property: "tarihTuru", value: "tarihAraligiIcinde", filterType: "kriterPanel", isEnum: false, type: "String", operator: "=" },
+      { index: 2, property: "tarih", value: start, filterType: "kriterPanel", type: "date", operator: "=" },
+      { index: 3, property: "e.baslangicTarihi", value: start, filterType: "kriterPanel", type: "date", operator: ">=" },
+      { index: 4, property: "e.bitisTarihi", value: end, filterType: "kriterPanel", type: "date", operator: "<=" },
+      { index: 5, property: "birimSevk.id", value: Number(p.birimSevkId), filterType: "kriterPanel", type: "Long", operator: "=" },
+      { index: 6, property: "yeri", value: 2, filterType: "kriterPanel", isEnum: true, type: "tr.com.fonet.hbys.common.enums.EOrderYeri", operator: "=" },
+      { index: 7, property: "hemsireOrder", value: "false", filterType: "kriterPanel", isEnum: false, type: "String", operator: "=" }
+    ];
+    const data = await apiJson("/Stok/EOrder/getKayitList", {
+      autoStores: ["turu", "stokTuru", "antibiyotikTuru", "ekstravazeIlacSekli", "durum"],
+      filterMap: "",
+      filter: JSON.stringify(filter),
+      page: 1,
+      start: 0,
+      limit: 100
+    });
+    return Array.isArray(data.data) ? data.data : [];
+  }
+
+  function idValue(value) {
+    if (value == null || value === "") return null;
+    if (typeof value === "object") return value.id ?? value.ID ?? value.value ?? null;
+    return value;
+  }
+
+  function refObject(value) {
+    const id = idValue(value);
+    if (id == null || id === "") return null;
+    const text = String(id).trim();
+    return /^\d+$/.test(text) ? { id: Number(text) } : null;
+  }
+
+  function orderRawName(x = {}) {
+    return clean(
+      x.stok?.adi ||
+      x.hizmetMakro?.adi ||
+      x.malzeme?.adi ||
+      x.malzemeAdi ||
+      (typeof x.malzeme === "string" ? x.malzeme : "") ||
+      x.adi ||
+      x.ad ||
+      x.tedaviAdi ||
+      x.ilacAdi ||
+      x.aciklama ||
+      ""
+    );
+  }
+
+  function orderRawUnit(x = {}) {
+    return clean(x.birim?.adi || x.birimi || x.birimAdi || "");
+  }
+
+  function orderRawUsage(x = {}) {
+    const value = x.ilacKullanimSekli;
+    if (value && typeof value === "object") return clean(value.adi || value.name || value.aciklama || value.id || "");
+    const raw = clean(x.ilacKullanimSekliAdi || x.kullanimSekli || value || "");
+    const map = {
+      "1": "İnfüzyon",
+      "2": "İntravenöz",
+      "3": "Ağızdan",
+      "4": "Subkütan",
+      "5": "İnhaler"
+    };
+    return map[raw] || raw;
+  }
+
+  function orderRawTypeId(x = {}) {
+    return Number(idValue(x.turu) || x.turuId || 0);
+  }
+
+  function orderRawStockType(x = {}) {
+    return norm(x.stokTuru?.adi || x.stokTuru || x.stokTuruAdi || "");
+  }
+
+  function isSarfOrderName(name) {
+    return /hasta\s*(alt\s*)?bez|eldiven|lanset|flaster|yara\s*[öo]rt|ka[ğg][ıi]t\s*[öo]rdek|triflo|solunum egzersiz|kolostomi|ileostomi|torba|pasta|ven valf|irrigasyon|s[üu]rg[üu]|sonda|kateter/.test(norm(name));
+  }
+
+  function looksLikeDose(value) {
+    return /^\d+\s*x\s*\d+$/i.test(clean(value));
+  }
+
+  function isMedicineOrderRaw(x = {}) {
+    const name = orderRawName(x);
+    if (!name || isSarfOrderName(name)) return false;
+    if (orderRawTypeId(x) === 2) return false;
+    const stockType = orderRawStockType(x);
+    if (/sarf|malzeme|hizmet/.test(stockType)) return false;
+    return looksLikeDose(x.doz);
+    if (stockType && !/^ila[çc]$/.test(stockType)) return false;
+    return looksLikeDose(x.doz);
+  }
+
+  function isTransferExcludedOrderRaw(x = {}) {
+    const name = orderRawName(x);
+    if (!name || isSarfOrderName(name)) return false;
+    if (isFollowOrderRaw(x) || isMedicineOrderRaw(x)) return false;
+    const stockType = orderRawStockType(x);
+    if (/sarf|malzeme|hizmet/.test(stockType)) return false;
+    return Boolean(name);
+  }
+
+  function excludedOrderText(x = {}) {
+    return [
+      orderRawName(x) || "Adsız order",
+      clean(x.doz) ? `Doz: ${clean(x.doz)}` : "Doz yok/uyumsuz",
+      orderRawUnit(x) ? `Birim: ${orderRawUnit(x)}` : "",
+      orderRawUsage(x) ? `Kullanim: ${orderRawUsage(x)}` : ""
+    ].filter(Boolean).join(" | ");
+  }
+
+  function anyOrderText(x = {}) {
+    if (isFollowOrderRaw(x)) return followOrderText(x);
+    return [
+      orderRawName(x) || clean(x.aciklama) || "Order",
+      clean(x.doz) ? `Doz: ${clean(x.doz)}` : "",
+      orderRawUnit(x) ? `Birim: ${orderRawUnit(x)}` : "",
+      orderRawUsage(x) ? `Kullanim: ${orderRawUsage(x)}` : "",
+      clean(x.aciklama) && clean(x.aciklama) !== orderRawName(x) ? `Aciklama: ${clean(x.aciklama)}` : ""
+    ].filter(Boolean).join(" | ");
+  }
+
+  function isFollowOrderRaw(x = {}) {
+    return orderRawTypeId(x) === 2;
+    if (orderRawTypeId(x) === 2) return true;
+    return Boolean(x.eorderTakipDirektif || x.takipDirektif || /ald[iı]g[iı]\s*[çc][iı]kard|a[çc]t/i.test(norm(x.aciklama || "")));
+  }
+
+  function followOrderText(x = {}) {
+    const name = clean(x.eorderTakipDirektif?.adi || x.takipDirektif?.adi || x.takipAdi || "AÇT");
+    const note = clean(x.aciklama || "");
+    return [name, note && note !== name ? note : ""].filter(Boolean).join(" | ");
+  }
+
+  function tomorrowDateText() {
+    const base = todayRange().start.slice(0, 10);
+    const m = base.match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
+    if (!m) return base;
+    const d = new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1]));
+    d.setDate(d.getDate() + 1);
+    const dd = String(d.getDate()).padStart(2, "0");
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    return `${dd}.${mm}.${d.getFullYear()}`;
+  }
+
+  function patientOrderTomorrowText(p) {
+    const rows = p.orderRows || [];
+    const all = rows.filter((x) => isFollowOrderRaw(x) || orderRawName(x) || clean(x.aciklama));
+    if (!all.length) return "Order bulunamadi.";
+    return ["BUGUNUN ORDERI:", all.map((x, i) => `${i + 1}. ${anyOrderText(x)}`).join("\n")].join("\n");
+    const follows = rows.filter(isFollowOrderRaw);
+    const meds = rows.filter(isMedicineOrderRaw);
+    const parts = [];
+    if (follows.length) {
+      parts.push("TAKIP:");
+      parts.push(follows.map((x, i) => `${i + 1}. ${followOrderText(x)}`).join("\n"));
+    }
+    if (meds.length) {
+      if (parts.length) parts.push("");
+      parts.push("ILAC:");
+      parts.push(meds.map((x, i) => [
+        `${i + 1}. ${orderRawName(x)}`,
+        x.doz ? `Doz: ${x.doz}` : "",
+        orderRawUnit(x) ? `Birim: ${orderRawUnit(x)}` : "",
+        orderRawUsage(x) ? `Kullanim: ${orderRawUsage(x)}` : ""
+      ].filter(Boolean).join(" | ")).join("\n"));
+    }
+    return parts.join("\n") || "Order bulunamadı.";
+  }
+
+  function draftFromMedicineRaw(x, targetDate, birimSevkId) {
+    const stok = refObject(x.stok || x.stokId || x.malzeme || x.malzemeId || x.kodu || x.hizmetKodu);
+    const birim = refObject(x.birim || x.birimId || x.stok?.birim || x.stok?.birimId || x.malzeme?.birim || x.malzeme?.birimId || x.stokBirim || x.stokBirimId);
+    const depo = refObject(x.depo || x.depoId || x.stok?.depo || x.stokDepo || x.stokDepoId) || { id: 60000022000 };
+    const birimSevk = refObject(x.birimSevk || x.birimSevkId || birimSevkId);
+    if (!stok || !birimSevk) return null;
+    const draft = {
+      id: "",
+      durum: 0,
+      yeri: idValue(x.yeri) || 2,
+      turu: 1,
+      baslangicTarihi: `${targetDate} 00:00:00`,
+      bitisTarihi: `${targetDate} 00:00:00`,
+      doz: clean(x.doz),
+      ilacKullanimSekli: idValue(x.ilacKullanimSekli) || "",
+      verilisSuresi: x.verilisSuresi || "",
+      tedaviTuru: x.tedaviTuru == null ? "" : idValue(x.tedaviTuru),
+      luzumHalinde: x.luzumHalinde || 0,
+      sozelOrder: x.sozelOrder || 0,
+      acilOrder: x.acilOrder || "",
+      yirmiDortSaat: x.yirmiDortSaat || "",
+      birimSevk,
+      aciklama: x.aciklama || null,
+      birimCarpani: x.birimCarpani == null || x.birimCarpani === "" ? 1 : x.birimCarpani,
+      dozArtirimi: x.dozArtirimi || "",
+      raporTakipNo: x.raporTakipNo || null,
+      miktar: x.miktar == null || x.miktar === "" ? Number(String(x.doz || "1").match(/\d+/)?.[0] || 1) : x.miktar,
+      eczaciNotu: null,
+      hekimNotu: null,
+      evdenOrder: null,
+      depo,
+      stok
+    };
+    if (birim) draft.birim = birim;
+    return draft;
+  }
+
+  function draftFromFollowRaw(x, targetDate, birimSevkId) {
+    const birimSevk = refObject(x.birimSevk || x.birimSevkId || birimSevkId);
+    const directive = refObject(x.eorderTakipDirektif || x.takipDirektif) || { id: 60000000103 };
+    if (!birimSevk || !directive) return null;
+    return {
+      id: "",
+      durum: 0,
+      yeri: idValue(x.yeri) || 2,
+      turu: 2,
+      baslangicTarihi: `${targetDate} 00:00:00`,
+      bitisTarihi: `${targetDate} 00:00:00`,
+      doz: x.doz || "1x1",
+      ilacKullanimSekli: "",
+      verilisSuresi: "",
+      tedaviTuru: idValue(x.tedaviTuru) || 1,
+      luzumHalinde: x.luzumHalinde || 0,
+      sozelOrder: x.sozelOrder || 0,
+      acilOrder: x.acilOrder || "",
+      yirmiDortSaat: x.yirmiDortSaat || "",
+      birimSevk,
+      aciklama: x.aciklama || "ALDIĞI ÇIKARDIĞI TAKİBİ",
+      birimCarpani: "",
+      dozArtirimi: "",
+      raporTakipNo: null,
+      miktar: x.miktar || 1,
+      eczaciNotu: null,
+      hekimNotu: null,
+      evdenOrder: null,
+      eorderTakipDirektif: directive
+    };
+  }
+
+  function draftFromAnyOrderRaw(x, targetDate, birimSevkId) {
+    if (isFollowOrderRaw(x)) return draftFromFollowRaw(x, targetDate, birimSevkId);
+    const birimSevk = refObject(x.birimSevk || x.birimSevkId || birimSevkId);
+    const stok = refObject(x.stok || x.stokId || x.malzeme || x.malzemeId || x.kodu || x.hizmetKodu);
+    const birim = refObject(x.birim || x.birimId || x.stok?.birim || x.stok?.birimId || x.malzeme?.birim || x.malzeme?.birimId || x.stokBirim || x.stokBirimId);
+    const depo = refObject(x.depo || x.depoId || x.stok?.depo || x.stokDepo || x.stokDepoId) || { id: 60000022000 };
+    if (!birimSevk) return null;
+
+    const draft = {
+      id: "",
+      durum: 0,
+      yeri: idValue(x.yeri) || 2,
+      turu: idValue(x.turu) || 1,
+      baslangicTarihi: `${targetDate} 00:00:00`,
+      bitisTarihi: `${targetDate} 00:00:00`,
+      doz: clean(x.doz || "1x1"),
+      ilacKullanimSekli: idValue(x.ilacKullanimSekli) || "",
+      verilisSuresi: x.verilisSuresi || "",
+      tedaviTuru: x.tedaviTuru == null ? "" : idValue(x.tedaviTuru),
+      luzumHalinde: x.luzumHalinde || 0,
+      sozelOrder: x.sozelOrder || 0,
+      acilOrder: x.acilOrder || "",
+      yirmiDortSaat: x.yirmiDortSaat || "",
+      birimSevk,
+      aciklama: x.aciklama || null,
+      birimCarpani: x.birimCarpani == null || x.birimCarpani === "" ? 1 : x.birimCarpani,
+      dozArtirimi: x.dozArtirimi || "",
+      raporTakipNo: x.raporTakipNo || null,
+      miktar: x.miktar == null || x.miktar === "" ? Number(String(x.doz || "1").match(/\d+/)?.[0] || 1) : x.miktar,
+      eczaciNotu: null,
+      hekimNotu: null,
+      evdenOrder: null
+    };
+    if (stok) draft.stok = stok;
+    if (birim) draft.birim = birim;
+    if (depo) draft.depo = depo;
+    const hizmetMakro = refObject(x.hizmetMakro || x.hizmetMakroId);
+    if (hizmetMakro) draft.hizmetMakro = hizmetMakro;
+    return draft;
+  }
+
+  function buildPatientOrderDraft(p) {
+    const targetDate = tomorrowDateText();
+    const rows = (p.orderRows || []).filter((x) => isFollowOrderRaw(x) || orderRawName(x) || clean(x.aciklama));
+    const missing = [];
+    const eorderList = [];
+    rows.forEach((x) => {
+      const draft = draftFromAnyOrderRaw(x, targetDate, p.birimSevkId);
+      if (draft) eorderList.push(draft);
+      else missing.push(anyOrderText(x));
+    });
+    return { targetDate, eorderList, missing, expected: rows.length };
+  }
+
+  function hasRequiredOrderIdentity(x = {}) {
+    if (isFollowOrderRaw(x)) return true;
+    if (refObject(x.hizmetMakro || x.hizmetMakroId)) return true;
+    const stok = refObject(x.stok || x.stokId || x.malzeme || x.malzemeId || x.kodu || x.hizmetKodu);
+    return Boolean(stok);
+  }
+
+  function buildPatientOrderDraftSafe(p) {
+    const targetDate = tomorrowDateText();
+    const rows = (p.orderRows || []).filter((x) => isFollowOrderRaw(x) || orderRawName(x) || clean(x.aciklama));
+    const missing = [];
+    const eorderList = [];
+    rows.forEach((x) => {
+      if (!hasRequiredOrderIdentity(x)) {
+        missing.push(anyOrderText(x));
+        return;
+      }
+      const draft = isMedicineOrderRaw(x)
+        ? draftFromMedicineRaw(x, targetDate, p.birimSevkId)
+        : draftFromAnyOrderRaw(x, targetDate, p.birimSevkId);
+      if (draft) eorderList.push(draft);
+      else missing.push(anyOrderText(x));
+    });
+    return { targetDate, eorderList, missing, expected: rows.length };
+  }
+
+  function orderCompareKey(x = {}) {
+    if (isFollowOrderRaw(x)) return `T|${norm(followOrderText(x))}|${clean(x.doz || "1x1").toLowerCase()}`;
+    return `O|${norm(orderRawName(x) || clean(x.aciklama))}|${clean(x.doz || "1x1").toLowerCase()}`;
+  }
+
+  function countOrderKeys(rows = []) {
+    const map = new Map();
+    rows.forEach((x) => {
+      if (!isFollowOrderRaw(x) && !orderRawName(x) && !clean(x.aciklama)) return;
+      const key = orderCompareKey(x);
+      map.set(key, (map.get(key) || 0) + 1);
+    });
+    return map;
+  }
+
+  function missingCopiedRows(sourceRows = [], copiedRows = []) {
+    const copied = countOrderKeys(copiedRows);
+    const missing = [];
+    sourceRows.filter((x) => isFollowOrderRaw(x) || orderRawName(x) || clean(x.aciklama)).forEach((x) => {
+      const key = orderCompareKey(x);
+      const left = copied.get(key) || 0;
+      if (left > 0) {
+        copied.set(key, left - 1);
+      } else {
+        missing.push(anyOrderText(x));
+      }
+    });
+    return missing;
+  }
+
+  function waitMs(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  async function transferPatientOrdersTomorrow(p) {
+    const sentDraft = buildPatientOrderDraft(p);
+    if (!sentDraft.eorderList.length) throw new Error("Aktarilacak order bulunamadi.");
+    await apiJsonBody("/Stok/EOrder/updateKayit", "PUT", { eorderList: sentDraft.eorderList });
+    await waitMs(700);
+    const copiedRows = await fetchOrderRowsForDate(p, sentDraft.targetDate);
+    const notCopied = missingCopiedRows(p.orderRows || [], copiedRows);
+    sentDraft.notCopied = [...new Set([...(sentDraft.missing || []), ...notCopied])];
+    sentDraft.fallbackReason = "guvenli mod";
+    return sentDraft;
+    /*
+    const fullDraft = buildPatientOrderDraft(p);
+    if (!fullDraft.eorderList.length) throw new Error("Aktarilacak order bulunamadi.");
+    let sentDraft = fullDraft;
+    let fallbackReason = "";
+    try {
+      await apiJsonBody("/Stok/EOrder/updateKayit", "PUT", { eorderList: fullDraft.eorderList });
+    } catch (e) {
+      fallbackReason = e?.message || String(e);
+      sentDraft = buildPatientOrderDraftSafe(p);
+      if (!sentDraft.eorderList.length) throw new Error(`FONET tum paketi reddetti, gonderilebilir satir bulunamadi: ${fallbackReason}`);
+      await apiJsonBody("/Stok/EOrder/updateKayit", "PUT", { eorderList: sentDraft.eorderList });
+    }
+    await waitMs(700);
+    const copiedRows = await fetchOrderRowsForDate(p, sentDraft.targetDate);
+    const notCopied = missingCopiedRows(p.orderRows || [], copiedRows);
+    sentDraft.notCopied = [...new Set([...(sentDraft.missing || []), ...notCopied])];
+    sentDraft.fallbackReason = fallbackReason;
+    return sentDraft;
+    */
+    /*
+    const draft = buildPatientOrderDraft(p);
+    draft.missing = [];
+    if (draft.missing?.length) throw new Error(`Eksik bilgi nedeniyle aktarım durdu: ${draft.missing.join(", ")}`);
+    if (!draft.eorderList.length) throw new Error("Aktarılacak order bulunamadı.");
+    await apiJsonBody("/Stok/EOrder/updateKayit", "PUT", { eorderList: draft.eorderList });
+    await waitMs(700);
+    const copiedRows = await fetchOrderRowsForDate(p, draft.targetDate);
+    const notCopied = missingCopiedRows(p.orderRows || [], copiedRows);
+    if (notCopied.length) {
+      throw new Error(`FONET'e gönderildi ama şu satır(lar) yarın listesinde görünmedi: ${notCopied.join(", ")}`);
+    }
+    return draft;
+    */
+  }
+
+  async function fetchLabs(p) {
+    if (!p.hastaGelisId && !p.hastaId) return;
+    const property = p.hastaGelisId ? "hastaGelisId" : "hastaId";
+    const value = p.hastaGelisId || p.hastaId;
+    const kabul = await apiJson("/Lis/LisRaporSonuc/getLisRaporHastaInfoList", {
+      filter: JSON.stringify([{ property, value: Number(value), type: "Long", operator: "=" }]),
+      page: 1,
+      start: 0,
+      limit: 20,
+      sort: JSON.stringify([{ property: "lisKabulTarihi", direction: "DESC" }])
+    });
+    if (!p.hastaGelisId && kabul.data?.[0]?.hastaGelisId) p.hastaGelisId = kabul.data[0].hastaGelisId;
+    const latest = (kabul.data || []).slice(0, 5);
+    const barkods = [];
+    for (const k of latest) {
+      const tup = await apiJson("/Lis/LisRaporSonuc/getLisHastaTupInfo", {
+        filter: JSON.stringify([{ filterType: "kriterPanel", property: "t.lisKabul.id", value: Number(k.lisKabulId), type: "Long", operator: "=" }]),
+        page: 1,
+        start: 0,
+        limit: 100
+      });
+      barkods.push(...(tup.data || []).map((x) => x.barkodNo).filter(Boolean));
+    }
+    if (!barkods.length) return;
+    const detail = await apiJson("/Lis/LisRaporSonuc/getLisRaporDetay", {
+      filter: JSON.stringify([{ filterType: "kriterPanel", property: "t.lisHastaTup.barkodNo", value: barkods, type: "Long", operator: "IN" }]),
+      page: 1,
+      start: 0,
+      limit: 300,
+      group: JSON.stringify([{ property: "tupAdi", direction: "ASC" }]),
+      sort: JSON.stringify([{ property: "lt.siraNo", direction: "ASC" }])
+    });
+    const summarized = summarizeLabs(detail.data || []);
+    const mainLabDate = relevantLabDate(summarized.labs);
+    const labDateText = compactLabDateHeader(labVisitDates(summarized.labs, 8));
+    if (mainLabDate) {
+      p.labs = summarized.labs;
+      p.labDate = labDateText || mainLabDate;
+    } else if (!p.labs) {
+      p.labs = summarized.labs;
+      p.labDate = "";
+    }
+    if (summarized.glucoseChecks.length) {
+      p.glucoseChecks = summarized.glucoseChecks;
+    } else if (!Array.isArray(p.glucoseChecks)) {
+      p.glucoseChecks = [];
+    }
+    p.cultures = summarized.cultures || [];
+  }
+
+  async function runPool(items, concurrency, worker) {
+    if (!items.length) return;
+    let cursor = 0;
+    const workerCount = Math.max(1, Math.min(Number(concurrency) || 1, items.length));
+    const workers = Array.from({ length: workerCount }, async () => {
+      while (state.active) {
+        const index = cursor;
+        cursor += 1;
+        if (index >= items.length) return;
+        await worker(items[index], index);
+      }
+    });
+    await Promise.all(workers);
+  }
+
+  async function refreshPatientDetails(p, shouldRender = true, forceAll = true, onlyLabels = null) {
+    p.loading = true;
+    p.errors = [];
+    if (shouldRender) scheduleRender(25);
+    const key = displayKey(p);
+    const stamps = state.patientRefreshAt[key] || (state.patientRefreshAt[key] = {});
+    const now = Date.now();
+    const failedLabels = [];
+    const due = (label, interval) => (!onlyLabels || onlyLabels.includes(label)) && (forceAll || !stamps[label] || now - stamps[label] >= interval);
+    const run = async (label, interval, fn) => {
+      if (!due(label, interval)) return;
+      const failureKey = `${key}|${label}`;
+      const failure = state.endpointFailures[failureKey] || { count: 0, retryAt: 0 };
+      const essential = ["Sevk", "Vital", "Lab"].includes(label);
+      const warmup = state.metrics.cycles <= 2;
+      if (!forceAll && !essential && !warmup && failure.retryAt > now) return;
+      state.metrics.requests += 1;
+      let timeoutId = 0;
+      try {
+        await Promise.race([
+          fn(),
+          new Promise((_, reject) => {
+            timeoutId = window.setTimeout(() => reject(new Error("15 sn zaman aşımı")), 15000);
+          })
+        ]);
+        stamps[label] = Date.now();
+        delete state.endpointFailures[failureKey];
+      } catch (e) {
+        p.errors.push(`${label}: ${e.message}`);
+        failedLabels.push(label);
+        const count = failure.count + 1;
+        state.endpointFailures[failureKey] = { count, retryAt: Date.now() + (essential || warmup ? 30000 : Math.min(15 * 60000, Math.max(0, count - 1) * 120000)) };
+        state.metrics.errors += 1;
+      } finally {
+        if (timeoutId) window.clearTimeout(timeoutId);
+      }
+    };
+    await Promise.all([
+      run("Sevk", 600000, () => fetchSevkInfo(p)),
+      run("Klinik", 600000, () => fetchClinical(p))
+    ]);
+    const jobs = [
+      ["Kons", 300000, () => fetchConsults(p)],
+      ["Rad", 600000, () => fetchRadiology(p)],
+      ["Vital", 120000, () => fetchVitals(p)],
+      ["Lab", 120000, () => fetchLabs(p)],
+      ["Order", 300000, () => fetchOrders(p)],
+      ["Devir", 300000, () => fetchNursing(p)],
+      ["Diyet", 600000, () => fetchDiet(p)],
+      ["Ameliyat", 600000, () => fetchSurgeries(p)]
+    ];
+    await runPool(jobs, forceAll ? 3 : 2, async ([label, interval, fn]) => run(label, interval, fn));
+    p.loading = false;
+    p.updatedAt = new Date().toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" });
+    notifyChanges(p);
+    if (shouldRender) scheduleRender(25);
+    p.lastFailedLabels = [...new Set(failedLabels)];
+    return p.lastFailedLabels;
+  }
+
+  function patientSnapshot(p) {
+    return {
+      labs: p.labs,
+      glucoseChecks: p.glucoseChecks,
+      vitals: p.vitals,
+      consults: p.consults,
+      orders: p.orders,
+      nursing: p.nursing,
+      radiology: p.radiology,
+      surgeries: p.surgeries,
+      anesthesia: p.anesthesia,
+      asa: p.asa,
+      knownDiseases: p.knownDiseases,
+      homeMeds: p.homeMeds,
+      plannedOperation: p.plannedOperation,
+      postopPlace: p.postopPlace,
+      diyet: p.diyet,
+      diyetAraOgun: p.diyetAraOgun,
+      clinical: p.clinical
+    };
+  }
+
+  function hashPatient(p) {
+    return stableJson(patientSnapshot(p));
+  }
+
+  function changedParts(before = {}, after = {}) {
+    const checks = [
+      ["labs", "Yeni lab"],
+      ["glucoseChecks", "Yeni glukoz"],
+      ["vitals", "Yeni vital"],
+      ["consults", "Kons güncellendi"],
+      ["orders", "Yeni order"],
+      ["nursing", "Yeni devir"],
+      ["radiology", "Yeni radyoloji"],
+      ["surgeries", "Ameliyat"],
+      ["anesthesia", "Anestezi formu"],
+      ["asa", "ASA güncellendi"],
+      ["knownDiseases", "BH güncellendi"],
+      ["homeMeds", "Kİ güncellendi"],
+      ["plannedOperation", "GO güncellendi"],
+      ["postopPlace", "Yer güncellendi"],
+      ["diyet", "Diyet güncellendi"],
+      ["diyetAraOgun", "Diyet güncellendi"],
+      ["clinical", "Klinik izlem"]
+    ];
+    const labels = checks
+      .filter(([field]) => stableJson(before?.[field] || null) !== stableJson(after?.[field] || null))
+      .map(([, label]) => label);
+
+    if (labels.includes("Kons güncellendi")) {
+      const oldAnswers = stableJson((before.consults || []).map((c) => [c.id, c.date, c.unit, c.answer]).filter((x) => x[3]));
+      const newAnswers = stableJson((after.consults || []).map((c) => [c.id, c.date, c.unit, c.answer]).filter((x) => x[3]));
+      return labels.map((label) => label === "Kons güncellendi" && oldAnswers !== newAnswers ? "Kons cevaplandı" : label);
+    }
+    return labels;
+  }
+
+  function latestLabDetail(labs = {}) {
+    const keys = ["WBC", "Hb", "PLT", "Kre", "CRP", "PCT", "Glu", "Na", "K", "P", "Ca", "Mg", "AST", "ALT", "ALP", "GGT", "Tbil", "Dbil"];
+    return keys
+      .map((key) => {
+        const item = labs?.[key]?.[0];
+        return item?.value ? `${key}: ${item.value}` : "";
+      })
+      .filter(Boolean)
+      .join(" | ");
+  }
+
+  function latestGlucoseDetail(checks = []) {
+    const item = checks?.[0];
+    if (!item?.value) return "";
+    return [
+      `${item.value} mg/dL`,
+      item.date || ""
+    ].filter(Boolean).join(" | ");
+  }
+
+  function consultChangeDetail(before = {}, after = {}) {
+    const oldAnswers = new Set((before.consults || []).filter(consultIsAnswered).map((c) => `${c.id}|${c.answer}`));
+    const answered = (after.consults || []).find((c) => consultIsAnswered(c) && !oldAnswers.has(`${c.id}|${c.answer}`));
+    const item = answered || (after.consults || [])[0];
+    if (!item) return "";
+    return [
+      [item.date, item.unit].filter(Boolean).join(" | "),
+      item.request ? `İstem: ${clip(item.request, 260)}` : "",
+      item.answer ? `Cevap: ${clip(item.answer, 520)}` : "Cevap: Bekliyor"
+    ].filter(Boolean).join("\n");
+  }
+
+  function changeDetailText(labels = [], before = {}, after = {}, p = {}) {
+    const parts = [];
+    const add = (title, text) => {
+      const value = cleanMultiline(text);
+      if (value) parts.push(`${title}: ${value}`);
+    };
+    if (labels.includes("Yeni vital")) add("Yeni vital", formatVitals(after.vitals || [], 1));
+    if (labels.includes("Yeni lab")) add(`Yeni lab${p.labDate ? ` (${p.labDate})` : ""}`, latestLabDetail(after.labs));
+    if (labels.includes("Yeni glukoz")) add("Yeni glukoz", latestGlucoseDetail(after.glucoseChecks));
+    if (labels.includes("Kons cevaplandı") || labels.includes("Kons güncellendi")) {
+      add(labels.includes("Kons cevaplandı") ? "Kons cevabı" : "Kons durumu", consultChangeDetail(before, after));
+    }
+    if (labels.includes("Yeni order")) {
+      add("Yeni order", (after.orders || []).slice(0, 6).map((x) => `${x.name || ""} ${x.dose || ""}`.trim()).filter(Boolean).join("\n"));
+    }
+    if (labels.includes("Yeni devir")) add("Hemşire/devir", (after.nursing || [])[0]?.text || "");
+    if (labels.includes("Yeni radyoloji")) add("Radyoloji", formatRadiology(after.radiology || [], 1, 520));
+    if (labels.includes("Diyet güncellendi")) add("Diyet", [p.diyet, p.diyetAraOgun].filter(Boolean).join(" / "));
+    if (labels.includes("Klinik izlem")) add("Klinik izlem", clip(after.clinical || "", 520));
+    if (labels.includes("ASA güncellendi") || labels.includes("Anestezi formu")) {
+      add("Anestezi", [`ASA: ${p.asa || "-"}`, `BH: ${p.knownDiseases || "-"}`, `Kİ: ${p.homeMeds || "-"}`, `GO: ${p.plannedOperation || "-"}`].join("\n"));
+    }
+    if (labels.includes("BH güncellendi")) add("Bilinen hastalıklar", p.knownDiseases || "");
+    if (labels.includes("Kİ güncellendi")) add("Kullandığı ilaçlar", p.homeMeds || "");
+    if (labels.includes("GO güncellendi")) add("Planlanan ameliyat", p.plannedOperation || "");
+    if (labels.includes("Yer güncellendi")) add("Planlanan yer", p.postopPlace || "");
+    if (labels.includes("Ameliyat")) add("Ameliyat", (after.surgeries || []).slice(0, 3).map((x) => [x.name, x.startDate || x.requestDate].filter(Boolean).join(" | ")).join("\n"));
+    return parts.join("\n\n");
+  }
+
+  function notifyChanges(p) {
+    const key = p.key || patientKey(p);
+    const snapshot = patientSnapshot(p);
+    const hash = stableJson(snapshot);
+    const seen = state.seen[key];
+    const oldHash = typeof seen === "string" ? seen : seen?.hash;
+    const oldSnapshot = typeof seen === "string" ? null : seen?.snapshot;
+    if (!oldHash) {
+      state.seen[key] = { hash, snapshot };
+      return;
+    }
+    if (oldHash !== hash) {
+      state.seen[key] = { hash, snapshot };
+      const labels = changedParts(oldSnapshot, snapshot);
+      if (!labels.length) return;
+      p.changedAt = Date.now();
+      p.changedLabels = [...new Set([...(p.changedLabels || []), ...labels])];
+      p.changedText = p.changedLabels.slice(0, 4).join(", ");
+      const eventDetail = changeDetailText(labels, oldSnapshot || {}, snapshot, p);
+      p.changedDetail = eventDetail;
+      p.lastChangeText = [...new Set(labels)].join(", ");
+      p.lastChangeDetail = eventDetail;
+      recordDesktopNotification(p, labels, eventDetail);
+      const msg = `${p.oda || ""} ${p.adSoyad || "Hasta"}: ${p.changedText}`;
+      state.lastMessage = msg;
+      try {
+        if ("Notification" in window && Notification.permission === "granted") {
+          new Notification("Vizit Sade", { body: msg });
+        } else if ("Notification" in window && Notification.permission === "default") {
+          Notification.requestPermission();
+        }
+      } catch (e) {}
+      playNotificationSound(labels);
+    }
+  }
+
+  function pageIsHidden() {
+    try { return Boolean((window.top || window).document.hidden); }
+    catch (e) { return Boolean(document.hidden); }
+  }
+
+  async function refreshAllDetails(force = false, reason = "scheduled") {
+    if (!state.active || (!force && pageIsHidden())) return;
+    if (state.busy) {
+      if (force) state.pendingForceRefresh = true;
+      return;
+    }
+    state.busy = true;
+    const isBootstrap = force && !state.bootstrapComplete;
+    const cycleStartedAt = performance.now();
+    state.metrics.cycles += 1;
+    state.metrics.updated = 0;
+    state.metrics.processed = 0;
+    try {
+      collectServicePatients(false);
+      const candidates = state.patients.filter((p) => (p.birimSevkId || p.hastaGelisId || p.hastaId) && !(state.pausedKeys || []).includes(displayKey(p)));
+      state.metrics.total = candidates.length;
+      const retryQueue = [];
+      state.lastMessage = isBootstrap
+        ? `İlk tam yükleme: ${candidates.length}/${state.patients.length} hastanın bütün detayları çekiliyor.`
+        : `${candidates.length}/${state.patients.length} hasta için arka plan detay çekiliyor.`;
+      scheduleRender(25);
+
+      const patientConcurrency = isBootstrap ? 3 : 2;
+      await runPool(candidates, patientConcurrency, async (p) => {
+        if (!state.active || (!force && pageIsHidden())) return;
+        try {
+          const failed = await refreshPatientDetails(p, false, force);
+          if (failed.length) retryQueue.push({ p, labels: failed });
+          state.metrics.updated += 1;
+        } catch (e) {}
+        state.metrics.processed += 1;
+        state.lastMessage = `Tur ${state.metrics.cycles}: ${state.metrics.processed}/${state.metrics.total} hasta işlendi.`;
+        if (state.metrics.processed % 3 === 0 || state.metrics.processed === state.metrics.total) scheduleRender(120);
+        await new Promise((resolve) => window.setTimeout(resolve, 60));
+      });
+
+      if (retryQueue.length && state.active) {
+        state.lastMessage = `Ana tur tamamlandı. ${retryQueue.length} hasta için başarısız bölümler tekrar deneniyor.`;
+        scheduleRender(25);
+        for (let i = 0; i < retryQueue.length; i += 1) {
+          if (!state.active) break;
+          const item = retryQueue[i];
+          state.lastMessage = `Tekrar deneme ${i + 1}/${retryQueue.length}: ${item.p.oda || ""} ${item.p.adSoyad || "Hasta"} — ${item.labels.join(", ")}`;
+          try { await refreshPatientDetails(item.p, false, true, item.labels); } catch (e) {}
+          if ((i + 1) % 3 === 0 || i + 1 === retryQueue.length) scheduleRender(150);
+          await new Promise((resolve) => window.setTimeout(resolve, 150));
+        }
+      }
+
+      state.lastMessage = `${isBootstrap ? "İlk tam yükleme" : "Detay"} tamamlandı: ${new Date().toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" })}`;
+    } finally {
+      if (isBootstrap) state.bootstrapComplete = true;
+      const rerunForced = state.pendingForceRefresh;
+      state.pendingForceRefresh = false;
+      state.busy = false;
+      state.metrics.lastCycleMs = Math.round(performance.now() - cycleStartedAt);
+      state.metrics.lastCycleAt = Date.now();
+      state.metrics.nextCycleAt = Date.now() + 120000;
+      scheduleRender(25);
+      if (rerunForced && state.active) {
+        window.setTimeout(() => refreshAllDetails(true, "queued"), 250);
+      }
+    }
+  }
+
+  async function bootstrapFullRefresh() {
+    if (state.bootstrapStarted || !state.active) return;
+    state.bootstrapStarted = true;
+    state.lastMessage = "Hasta listesi hazırlanıyor; ilk tam yükleme birazdan başlayacak.";
+    scheduleRender(25);
+    let previousSignature = "";
+    let stablePasses = 0;
+    for (let attempt = 0; attempt < 8 && state.active; attempt += 1) {
+      collectServicePatients(false);
+      const ready = state.patients.filter((p) => p.birimSevkId || p.hastaGelisId || p.hastaId);
+      const signature = ready.map((p) => `${displayKey(p)}:${p.birimSevkId || ""}:${p.hastaGelisId || ""}:${p.hastaId || ""}`).join("|");
+      stablePasses = signature && signature === previousSignature ? stablePasses + 1 : 0;
+      previousSignature = signature;
+      if (ready.length && stablePasses >= 1) break;
+      await waitMs(500);
+    }
+    if (state.active) await refreshAllDetails(true, "bootstrap");
+  }
+
+  function startAutoMonitor() {
+    if (!state.monitor) {
+      state.monitor = window.setInterval(() => refreshAllDetails(false), 120000);
+    }
+    if (!state.visibilityHandler) {
+      state.visibilityHandler = () => {
+        if (!pageIsHidden() && state.active && state.monitor) refreshAllDetails(false, "visible");
+      };
+      document.addEventListener("visibilitychange", state.visibilityHandler);
+    }
+    state.lastMessage = "Otomatik izleme açık: hasta bilgileri ve vitaller 120 sn. aralıkla güncellenir.";
+    state.metrics.nextCycleAt = Date.now() + 120000;
+  }
+
+  function restore() {
+    state.active = false;
+    if (state.monitor) window.clearInterval(state.monitor);
+    if (state.renderTimer) window.clearTimeout(state.renderTimer);
+    if (state.visibilityHandler) document.removeEventListener("visibilitychange", state.visibilityHandler);
+    if (state.original.xhrOpen) XMLHttpRequest.prototype.open = state.original.xhrOpen;
+    if (state.original.xhrSend) XMLHttpRequest.prototype.send = state.original.xhrSend;
+    if (state.original.extRequest && window.Ext?.Ajax) Ext.Ajax.request = state.original.extRequest;
+    removeUiEl("vizit-sade-live-panel");
+    removeUiEl("fsl-patient-modal");
+    removeUiEl("fsl-notification-center");
+    try {
+      if (state.panelWindow && !state.panelWindow.closed) state.panelWindow.close();
+    } catch (e) {}
+    state.panelWindow = null;
+    state.popupMode = false;
+  }
+
+  state.restore = restore;
+
+  function exportPatients() {
+    const safe = state.patients.map((p) => ({
+      ...p,
+      kimlikNo: p.kimlikNo ? "[MASKED]" : "",
+      raw: ""
+    }));
+    return JSON.stringify({ patients: safe, requests: state.requests.slice(0, 30) }, null, 2);
+  }
+
+  function bridgePayload() {
+    const payload = JSON.parse(exportPatients());
+    payload.generatedAt = new Date().toISOString();
+    payload.summary = {
+      total: state.patients.length,
+      changed: state.patients.filter((p) => p.changedText || p.changedLabels?.length).length,
+      consultAnswered: state.patients.filter((p) => unseenRecentAnsweredConsults(p).length).length,
+      lastMessage: state.lastMessage || ""
+    };
+    payload.changedPatients = state.patients
+      .filter((p) => p.changedText || p.changedLabels?.length || unseenRecentAnsweredConsults(p).length)
+      .map((p) => {
+        const unseen = unseenRecentAnsweredConsults(p);
+        return {
+          key: displayKey(p),
+          oda: p.oda,
+          adSoyad: p.adSoyad,
+          changedText: p.lastChangeText || p.changedText || (p.changedLabels || []).join(", ") || (unseen.length ? "Kons cevaplandı" : ""),
+          changedDetail: p.lastChangeDetail || p.changedDetail || (unseen.length ? consultChangeDetail({}, { consults: unseen }) : ""),
+          consultAnswered: unseen.length
+        };
+      })
+      .filter((p) => p.changedText || p.changedDetail || p.consultAnswered);
+    return payload;
+  }
+
+  function sendBridgeUpdate() {
+    if (!state.bridgeUrl || !window.fetch) return;
+    const now = Date.now();
+    if (now - (state.bridgeLastSent || 0) < 3500) return;
+    state.bridgeLastSent = now;
+
+    try {
+      fetch(state.bridgeUrl, {
+        method: "POST",
+        mode: "cors",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(bridgePayload())
+      })
+        .then((res) => { state.bridgeOnline = Boolean(res?.ok); })
+        .catch(() => { state.bridgeOnline = false; });
+    } catch (e) {
+      state.bridgeOnline = false;
+    }
+  }
+
+  async function copyExport() {
+    const text = exportPatients();
+    try {
+      await navigator.clipboard.writeText(text);
+      alert("Servis hasta listesi ve son endpoint ipuçları panoya kopyalandı.");
+    } catch (e) {
+      const out = uiEl("fsl-output");
+      if (out) out.value = text;
+    }
+  }
+
+  function todayConsultGroups() {
+    const groups = new Map();
+    state.patients.forEach((p) => {
+      if (!patientMatchesSearch(p)) return;
+      const key = p.key || patientKey(p);
+      const todays = (p.consults || []).filter((c) => isTodayTr(c.date));
+      if (!todays.length) return;
+      const unseenKeys = new Set(unseenRecentAnsweredConsults(p).map(consultKey));
+      const old = groups.get(key) || { p, key, items: [], latestTime: 0, unseenCount: 0 };
+      todays.forEach((c) => {
+        const ck = consultKey(c);
+        if (old.items.some((x) => consultKey(x) === ck)) return;
+        old.items.push(c);
+        old.latestTime = Math.max(old.latestTime, parseTrDate(c.date));
+        if (c.answer && unseenKeys.has(ck)) old.unseenCount += 1;
+      });
+      groups.set(key, old);
+    });
+
+    return Array.from(groups.values())
+      .map((g) => ({
+        ...g,
+        answeredCount: g.items.filter(consultIsAnswered).length,
+        pendingCount: g.items.filter((c) => !consultIsAnswered(c)).length
+      }))
+      .sort((a, b) => {
+        const pendingPriority = Number(b.pendingCount > 0) - Number(a.pendingCount > 0);
+        return pendingPriority || b.latestTime - a.latestTime;
+      });
+  }
+
+  function consultTrackingCard() {
+    const groups = todayConsultGroups();
+    const total = groups.reduce((sum, g) => sum + g.items.length, 0);
+    const answered = groups.reduce((sum, g) => sum + g.answeredCount, 0);
+    const pending = groups.reduce((sum, g) => sum + g.pendingCount, 0);
+    const rows = groups.slice(0, 18).map((g) => {
+      const latest = g.items.slice().sort((a, b) => parseTrDate(b.date) - parseTrDate(a.date))[0] || {};
+      const units = [...new Set(g.items.map((c) => clean(c.unit || "Kons")).filter(Boolean))].slice(0, 4).join(", ");
+      const hasPending = g.pendingCount > 0;
+      const color = hasPending ? "#f59e0b" : "#7c3aed";
+      const background = hasPending ? "#fffbeb" : "#faf5ff";
+      const status = hasPending
+        ? `${g.pendingCount} bekleyen • ${g.answeredCount} cevaplandı`
+        : `${g.answeredCount} cevaplandı${g.unseenCount ? ` • ${g.unseenCount} yeni` : ""}`;
+      return `
+        <button type="button" data-open-patient="${escapeHtml(g.key)}" style="text-align:left;border:1px solid #d7e2ea;border-left:5px solid ${color};border-radius:7px;background:${background};padding:8px;cursor:pointer;color:#0f172a;">
+          <div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start;">
+            <b style="font-size:13px;">${escapeHtml(g.p.oda || "-")} ${escapeHtml(g.p.adSoyad || "")}</b>
+            <span style="font-size:11px;background:${color};color:white;border-radius:5px;padding:2px 5px;white-space:nowrap;">${escapeHtml(status)}</span>
+          </div>
+          <div style="font-size:11px;color:#475569;margin-top:4px;">${escapeHtml(shortTime(latest.date) || "--:--")} | ${escapeHtml(units || "Kons")}</div>
+          <div style="font-size:11px;color:#64748b;margin-top:3px;">Toplam ${g.items.length} kons | ${g.answeredCount} cevaplandı | ${g.pendingCount} bekleyen</div>
+        </button>
+      `;
+    }).join("");
+
+    return `
+      <section id="fsl-consult-tracker" style="grid-column:1/-1;border:1px solid #cbd5e1;border-left:5px solid #7c3aed;border-radius:8px;background:white;padding:10px;">
+        <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;margin-bottom:8px;">
+          <div>
+            <div style="font-weight:bold;color:#0f172a;">Bugünkü Kons Takibi</div>
+            <div style="font-size:12px;color:#64748b;">Son 10 saatte atılan konslar gösterilir.</div>
+          </div>
+          <div style="font-size:12px;color:#334155;white-space:nowrap;">${total} kons | ${answered} cevap | ${pending} bekleyen</div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:8px;">
+          ${rows || `<div style="font-size:12px;color:#64748b;padding:8px;background:#f8fafc;border:1px dashed #cbd5e1;border-radius:7px;">Bugün kayıtlı kons görünmüyor.</div>`}
+        </div>
+      </section>
+    `;
+  }
+
+  function consultTrackingCardV16() {
+    const t = activeTheme();
+    const groups = todayConsultGroups();
+    const total = groups.reduce((sum, g) => sum + g.items.length, 0);
+    const answered = groups.reduce((sum, g) => sum + g.answeredCount, 0);
+    const pending = groups.reduce((sum, g) => sum + g.pendingCount, 0);
+    const rows = groups.slice(0, 18).map((g) => {
+      const latest = g.items.slice().sort((a, b) => parseTrDate(b.date) - parseTrDate(a.date))[0] || {};
+      const units = [...new Set(g.items.map((c) => clean(c.unit || "Kons")).filter(Boolean))].slice(0, 4).join(", ");
+      const hasPending = g.pendingCount > 0;
+      const color = hasPending ? "#f59e0b" : "#7c3aed";
+      const background = hasPending ? "#fffbeb" : "#faf5ff";
+      const status = hasPending
+        ? `${g.pendingCount} bekleyen • ${g.answeredCount} cevaplandı`
+        : `${g.answeredCount} cevaplandı${g.unseenCount ? ` • ${g.unseenCount} yeni` : ""}`;
+      return `
+        <button type="button" data-open-patient="${escapeHtml(g.key)}" style="text-align:left;border:1px solid ${t.border};border-left:5px solid ${color};border-radius:12px;background:${background};padding:10px;cursor:pointer;color:#0f172a;box-shadow:0 1px 2px rgba(15,23,42,.06);">
+          <div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start;">
+            <b style="font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(g.p.oda || "-")} ${escapeHtml(g.p.adSoyad || "")}</b>
+            <span style="font-size:11px;background:${color};color:white;border-radius:999px;padding:4px 7px;white-space:nowrap;font-weight:900;">${escapeHtml(status)}</span>
+          </div>
+          <div style="font-size:12px;color:${t.muted};margin-top:5px;">${escapeHtml(shortTime(latest.date) || "--:--")} | ${escapeHtml(units || "Kons")}</div>
+          <div style="font-size:11px;color:${t.muted};margin-top:3px;">Toplam ${g.items.length} | ${g.answeredCount} cevaplandı | ${g.pendingCount} bekleyen</div>
+        </button>
+      `;
+    }).join("");
+
+    return `
+      <section id="fsl-consult-tracker" style="grid-column:1/-1;border:1px solid ${t.border};border-left:6px solid ${t.purple};border-radius:14px;background:${t.surface2};padding:11px;color:${t.text};box-shadow:${t.shadow};">
+        <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;margin-bottom:9px;">
+          <div>
+            <div style="font-weight:950;color:${t.text};font-size:15px;">Bugünkü Kons Takibi</div>
+            <div style="font-size:12px;color:${t.muted};">Son 10 saatte atılan konslar gösterilir.</div>
+          </div>
+          <div style="font-size:12px;color:${t.text};white-space:nowrap;font-weight:900;">${total} kons | ${answered} cevap | ${pending} bekleyen</div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(245px,1fr));gap:8px;">
+          ${rows || `<div style="font-size:12px;color:${t.muted};padding:10px;background:${t.surface};border:1px dashed ${t.border};border-radius:10px;">Bugün kayıtlı kons görünmüyor.</div>`}
+        </div>
+      </section>
+    `;
+  }
+
+  function patientCard(p) {
+    const key = displayKey(p);
+    const unseenConsults = unseenRecentAnsweredConsults(p);
+    const latestConsult = unseenConsults[0] || (p.consults || []).find((x) => x.answer) || (p.consults || [])[0] || {};
+    const latestRad = (p.radiology || [])[0] || {};
+    const latestVital = (p.vitals || [])[0] || {};
+    const dietInfo = compactDietInfo(p.diyet);
+    const meta = extractCardMeta(p);
+    const freeText = patientFreeText(p);
+    const doctorCode = doctorInitials(p.doktor);
+    const age = clean(p.yas).match(/\d+/)?.[0] || clean(p.yas);
+    const ageSex = [age, sexShort(p.cinsiyet)].filter(Boolean).join("");
+    const diagnosis = clip(p.tani || p.clinical?.split("\n").find(Boolean) || "", 110);
+    const operation = operationBadge(p);
+    const dietBadge = dietInfo.code && dietInfo.code !== "-" ? dietInfo.code : "";
+    const riskBadge = clean(freeText.match(/sarı risk|kırmızı risk|yüksek risk|düşme riski/i)?.[0] || "").toLocaleUpperCase("tr-TR");
+    const orderText = (p.orders || []).slice(0, 5).map((x) => clean(`${x.name} ${x.dose}`)).filter(Boolean).join(" + ");
+    const consultText = latestConsult.answer
+      ? `${latestConsult.unit || "Kons"} -> ${clip(latestConsult.answer, 90)}`
+      : (latestConsult.unit ? `${latestConsult.unit}${latestConsult.request ? " -> " + clip(latestConsult.request, 80) : ""}` : "");
+    const radText = latestRad.exam
+      ? `${shortDate(latestRad.date)} ${latestRad.exam}${latestRad.reportText ? ": " + clip(latestRad.reportText, 90) : (latestRad.reportId ? " [rapor var]" : "")}`
+      : "";
+    const hasConsultAnswer = Boolean(unseenConsults.length);
+    const hasUnreadUpdate = Boolean(p.changedText || (p.changedLabels || []).length);
+    const changeText = hasUnreadUpdate ? (p.changedText || (p.changedLabels || []).join(", ") || "Güncellendi") : "";
+    const newAdmission = isNewAdmissionAlert(p);
+    const borderColor = newAdmission ? "#dc2626" : (hasUnreadUpdate ? "#f59e0b" : (hasConsultAnswer ? "#a855f7" : "#0ea5e9"));
+    const background = newAdmission ? "#fef2f2" : (hasUnreadUpdate ? "#fffbeb" : (hasConsultAnswer ? "#faf5ff" : "white"));
+    const ta = [latestVital.sys, latestVital.dia].filter(Boolean).join("/");
+    const resp = latestVital.resp || extractInlineValue(freeText, [/\bSS\s*[:\-]?\s*(\d+)/i, /solunum\s*[:\-]?\s*(\d+)/i]);
+    const pain = latestVital.pain || extractInlineValue(freeText, [/ağr[ıi]\s*[:\-]?\s*(\d+\s*\/\s*10|\d+)/i, /\bVAS\s*[:\-]?\s*(\d+\s*\/\s*10|\d+)/i]);
+    const followItems = extractFollowItems(p);
+    const facts = [
+      ["BH", meta.bh],
+      ["Kİ", meta.ki],
+      ["GO", meta.go],
+      ["Alerji", meta.allergy],
+      ["ASA", meta.asa],
+      ...(meta.destination ? [["Yer", meta.destination]] : [])
+    ];
+
+    return `
+      <article data-card="${escapeHtml(key)}" draggable="true" title="Kartı taşımak için sürükle, sağ alttan yüksekliğini değiştir." style="position:relative;border:1px solid #d7e2ea;border-left:5px solid ${borderColor};border-radius:10px;background:${background};padding:9px;height:${state.cardHeight || 250}px;box-sizing:border-box;cursor:pointer;resize:vertical;overflow:auto;font-family:Arial,sans-serif;box-shadow:0 6px 16px rgba(15,23,42,.10);will-change:transform;">
+        <div style="display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:start;border-bottom:1px solid #e2e8f0;padding-bottom:7px;">
+          <div style="min-width:0;">
+            <div style="display:flex;align-items:baseline;gap:7px;min-width:0;">
+              <span style="font-size:17px;font-weight:900;color:#0b3f91;line-height:1;white-space:nowrap;">${escapeHtml(doctorCode)}-${escapeHtml(p.oda || "-")}</span>
+              <span style="font-size:18px;font-weight:900;color:#111827;line-height:1.05;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml([p.adSoyad, ageSex].filter(Boolean).join(", "))}</span>
+            </div>
+            <div style="font-size:11px;color:#334155;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(diagnosis || p.birim || "")}</div>
+            <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:5px;margin-top:7px;">
+              ${iconTile("TA", ta, "TA", "#0b3f91")}
+              ${iconTile("Nabız", latestVital.pulse || "", "N", "#2563eb")}
+              ${iconTile("Ateş", latestVital.temp || "", "C", "#dc2626")}
+              ${iconTile("SpO2", latestVital.spo2 ? `${latestVital.spo2}%` : "", "O2", "#0891b2")}
+              ${iconTile("SS", resp, "SS", "#0f766e")}
+              ${iconTile("Ağrı", pain, "A", "#9333ea")}
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:5px;margin-top:6px;">
+              ${labTilesHtml(p.labs)}
+            </div>
+            ${glucoseCheckHtml(p)}
+          </div>
+          <div style="display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end;max-width:104px;">
+            ${operation ? `<span style="font-size:11px;font-weight:800;border:1px solid #1d4ed8;color:#1e3a8a;background:#eff6ff;border-radius:7px;padding:5px 7px;">${escapeHtml(operation)}</span>` : ""}
+            ${dietBadge ? `<span style="font-size:11px;font-weight:800;border:1px solid #64748b;color:#334155;background:#f8fafc;border-radius:7px;padding:5px 7px;">${escapeHtml(dietBadge)}</span>` : ""}
+            ${riskBadge ? `<span style="font-size:11px;font-weight:800;background:#facc15;color:#111827;border-radius:7px;padding:5px 7px;">${escapeHtml(riskBadge)}</span>` : ""}
+            ${newAdmission ? `<span style="font-size:11px;font-weight:800;background:#dc2626;color:white;border-radius:7px;padding:5px 7px;">Yeni yatış</span>` : ""}
+            ${hasConsultAnswer ? `<span style="font-size:11px;font-weight:800;background:#a855f7;color:white;border-radius:7px;padding:5px 7px;">Kons</span>` : ""}
+            ${changeText ? `<span style="font-size:11px;font-weight:800;background:#f59e0b;color:#111827;border-radius:7px;padding:5px 7px;">${escapeHtml(changeText)}</span>` : ""}
+            ${p.loading ? `<span style="font-size:10px;background:#fef3c7;color:#92400e;border-radius:6px;padding:4px 6px;">yükleniyor</span>` : ""}
+          </div>
+        </div>
+
+        <div style="display:flex;gap:7px;flex-wrap:wrap;border-bottom:1px solid #e2e8f0;padding:6px 0;color:#111827;font-size:11px;">
+          ${facts.map(([label, value]) => `<div style="padding-right:7px;border-right:1px solid #e2e8f0;max-width:170px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"><b>${escapeHtml(label)}:</b> ${escapeHtml(value || "-")}</div>`).join("")}
+        </div>
+
+        ${followItems.length ? `<div style="display:flex;flex-wrap:wrap;gap:0;margin-top:7px;border:1px solid #e2e8f0;border-radius:7px;overflow:hidden;background:#fff;">
+          ${followItems.map((x) => `<div style="font-size:11px;padding:5px 7px;border-right:1px solid #e2e8f0;"><b>${escapeHtml(x.label)}:</b> ${escapeHtml(x.value)}</div>`).join("")}
+        </div>` : ""}
+
+        <div style="border-radius:7px;overflow:hidden;margin-top:7px;border-bottom:1px solid #e2e8f0;font-size:11px;">
+          ${summaryRowHtml("G", "Görüntüleme", radText)}
+          ${summaryRowHtml("K", "Konsültasyon", consultText)}
+          ${summaryRowHtml("O", "Order", orderText)}
+        </div>
+
+        ${meta.plan ? `<div style="display:grid;grid-template-columns:24px 78px 1fr;gap:6px;align-items:center;margin-top:7px;border:1px solid #f59e0b;border-radius:8px;background:#fffbeb;padding:6px;">
+          <div style="font-size:16px;color:#d97706;text-align:center;">✓</div>
+          <div style="font-size:12px;font-weight:800;color:#111827;">Plan:</div>
+          <div style="font-size:12px;color:#1f2937;">${escapeHtml(meta.plan)}</div>
+        </div>` : ""}
+
+        ${p.errors?.length ? `<pre style="margin:10px 0 0;white-space:pre-wrap;font:11px/1.3 Arial,sans-serif;color:#b91c1c;background:#fff1f2;border:1px solid #fecdd3;border-radius:8px;padding:8px;">${escapeHtml(p.errors.slice(0, 3).join("\n"))}</pre>` : ""}
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;">
+          <button data-refresh="${escapeHtml(key)}" style="background:#0ea5e9;color:white;border:0;border-radius:6px;padding:5px 7px;cursor:pointer;font-size:11px;">Detay Yenile</button>
+          <span style="font-size:11px;color:#64748b;">${escapeHtml([p.updatedAt, p.yatis ? "Yatış " + shortDate(p.yatis) : "", p.doktor || ""].filter(Boolean).join(" | "))}</span>
+        </div>
+      </article>
+    `;
+  }
+
+  function patientAgeSex(p) {
+    const rawAge = clean(p.yas);
+    let age = "";
+    const exact = rawAge.match(/^(?:ya[şs]\s*)?(1[01]\d|120|[1-9]\d?)$/i);
+    const loose = rawAge.match(/\b(1[01]\d|120|[1-9]\d?)\b/);
+    const n = Number((exact || loose || [])[1]);
+    if (Number.isFinite(n) && n > 0 && n <= 120) age = String(n);
+    const sex = sexShort(p.cinsiyet);
+    return `${age}${sex}`.trim();
+  }
+
+  function statusPill(text, color, bg, textColor = "#fff") {
+    if (!text) return "";
+    return `<span style="font-size:11px;font-weight:900;line-height:1;border:1px solid ${color};background:${bg || color};color:${textColor};border-radius:999px;padding:6px 8px;white-space:nowrap;box-shadow:0 1px 2px rgba(15,23,42,.12);">${escapeHtml(text)}</span>`;
+  }
+
+  function vitalTileV16(label, value, icon, color, t) {
+    return `
+      <div style="display:grid;grid-template-columns:26px minmax(0,1fr);align-items:center;gap:6px;border:1px solid ${t.tileBorder};border-radius:10px;background:${t.tile};padding:7px;min-width:0;">
+        <div style="width:26px;height:26px;border-radius:8px;background:${color};color:white;display:grid;place-items:center;font-size:10px;font-weight:900;letter-spacing:0;">${escapeHtml(icon)}</div>
+        <div style="min-width:0;">
+          <div style="font-size:10px;color:${t.primary2};font-weight:900;line-height:1;white-space:nowrap;">${escapeHtml(label)}</div>
+          <div style="font-size:22px;color:${t.text};font-weight:950;line-height:1.05;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(value || "-")}</div>
+        </div>
+      </div>
+    `;
+  }
+
+  function labTileV16(label, value, trend = "", danger = false, t = activeTheme()) {
+    const shown = value || "-";
+    const color = danger || trend ? t.danger : t.text;
+    return `
+      <div style="border:1px solid ${t.border};border-radius:8px;background:${t.surface};padding:5px 5px;text-align:center;min-width:0;box-shadow:0 1px 2px rgba(15,23,42,.06);">
+        <div style="font-size:10px;color:${t.primary2};font-weight:900;line-height:1;">${escapeHtml(label)}</div>
+        <div style="font-size:15px;font-weight:950;color:${color};line-height:1.08;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(String(shown))}${trend ? ` <span>${escapeHtml(trend)}</span>` : ""}</div>
+      </div>
+    `;
+  }
+
+  function labTilesHtmlV16(labs, t) {
+    const one = (key, label, dangerFn = () => false) => {
+      const list = labs?.[key] || [];
+      const value = latestValue(list);
+      return labTileV16(label, value, trendMark(list), dangerFn(Number(String(value).replace(",", "."))), t);
+    };
+    return [
+      one("WBC", "WBC"),
+      one("Hb", "Hb", (v) => v && v < 12),
+      one("PLT", "Plt"),
+      one("Kre", "Kre", (v) => v && v > 1.3),
+      one("CRP", "CRP", (v) => v && v > 5),
+      one("PCT", "PCT", (v) => v && v > 0.5),
+      one("Glu", "Glu", (v) => v && (v < 70 || v > 180)),
+      one("Na", "Na", (v) => v && (v < 135 || v > 145)),
+      one("K", "K", (v) => v && (v < 3.5 || v > 5.2)),
+      one("P", "P", (v) => v && (v < 2.5 || v > 4.5))
+    ].join("");
+  }
+
+  function microInfo(label, value, t) {
+    return `
+      <div style="min-width:0;padding:5px 8px;border-right:1px solid ${t.border};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+        <b style="color:${t.primary2};">${escapeHtml(label)}:</b> ${escapeHtml(value || "-")}
+      </div>
+    `;
+  }
+
+  function summaryRowHtmlV16(icon, label, text, t) {
+    if (!text) return "";
+    return `
+      <div style="display:grid;grid-template-columns:25px 92px minmax(0,1fr);gap:7px;align-items:start;border:1px solid ${t.border};border-bottom:0;padding:6px 7px;background:${t.surface};">
+        <div style="width:23px;height:23px;border-radius:7px;background:${t.tile};color:${t.primary2};font-weight:950;text-align:center;display:grid;place-items:center;font-size:11px;">${escapeHtml(icon)}</div>
+        <div style="color:${t.primary2};font-weight:900;white-space:nowrap;">${escapeHtml(label)}:</div>
+        <div style="color:${t.text};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(text)}</div>
+      </div>
+    `;
+  }
+
+  function actionButtonHtml(id, text, color) {
+    return `<button id="${id}" style="background:${color};color:white;border:0;border-radius:8px;padding:9px 12px;cursor:pointer;font-weight:800;font-size:13px;line-height:1;">${escapeHtml(text)}</button>`;
+  }
+
+  function detailBlockV16(title, text, t, icon = "") {
+    const expanded = /Klinik Özet|Lab/i.test(title) ? " open" : "";
+    return `
+      <details${expanded} style="border:1px solid ${t.border};border-left:4px solid ${t.primary};border-radius:9px;background:${t.surface};padding:9px;min-width:0;box-shadow:0 1px 2px rgba(15,23,42,.04);">
+        <summary style="display:flex;align-items:center;gap:8px;cursor:pointer;list-style:none;">
+          ${icon ? `<div style="width:24px;height:24px;border-radius:8px;background:${t.tile};color:${t.primary2};display:grid;place-items:center;font-size:12px;font-weight:900;">${escapeHtml(icon)}</div>` : ""}
+          <div style="font-size:12px;color:${t.primary2};font-weight:950;text-transform:uppercase;letter-spacing:.02em;">${escapeHtml(title)}</div>
+        </summary>
+        <pre style="margin:8px 0 0;white-space:pre-wrap;font:13px/1.35 Arial,sans-serif;color:${t.text};max-height:240px;overflow:auto;">${escapeHtml(text || "-")}</pre>
+      </details>
+    `;
+  }
+
+  function patientCardV16(p) {
+    const t = activeTheme();
+    const key = displayKey(p);
+    const unseenConsults = unseenRecentAnsweredConsults(p);
+    const latestConsult = unseenConsults[0] || (p.consults || []).find((x) => x.answer) || (p.consults || [])[0] || {};
+    const latestRad = (p.radiology || [])[0] || {};
+    const latestVital = (p.vitals || [])[0] || {};
+    const dietInfo = compactDietInfo(p.diyet);
+    const meta = extractCardMeta(p);
+    const freeText = patientFreeText(p);
+    const doctorCode = doctorInitials(p.doktor);
+    const ageSex = patientAgeSex(p);
+    const diagnosis = clip(p.tani || p.clinical?.split("\n").find(Boolean) || p.birim || "", 86);
+    const operation = operationBadge(p);
+    const dietBadge = dietInfo.code && dietInfo.code !== "-" ? dietInfo.code : "";
+    const riskBadge = clean(freeText.match(/sarı risk|kırmızı risk|yüksek risk|düşme riski/i)?.[0] || "").toLocaleUpperCase("tr-TR");
+    const orderText = (p.orders || []).slice(0, 4).map((x) => clean(`${x.name} ${x.dose}`)).filter(Boolean).join(" + ");
+    const consultText = latestConsult.answer
+      ? `${latestConsult.unit || "Kons"} -> ${clip(latestConsult.answer, 78)}`
+      : (latestConsult.unit ? `${latestConsult.unit}${latestConsult.request ? " -> " + clip(latestConsult.request, 72) : ""}` : "");
+    const radText = latestRad.exam
+      ? `${shortDate(latestRad.date)} ${latestRad.exam}${latestRad.reportText ? ": " + clip(latestRad.reportText, 74) : (latestRad.reportId ? " [rapor var]" : "")}`
+      : "";
+    const hasConsultAnswer = Boolean(unseenConsults.length);
+    const hasUnreadUpdate = Boolean(p.changedText || (p.changedLabels || []).length);
+    const critical = criticalAlerts(p);
+    const pendingConsultCount = patientPendingConsults(p);
+    const newOrder = patientHasNewOrder(p);
+    const criticalLab = patientHasCriticalLab(p);
+    const isPinned = (state.pinnedKeys || []).includes(key);
+    const isPaused = (state.pausedKeys || []).includes(key);
+    const changeText = hasUnreadUpdate ? clip(p.changedText || (p.changedLabels || []).join(", ") || "Güncellendi", 42) : "";
+    const newAdmission = isNewAdmissionAlert(p);
+    const borderColor = critical.length ? "#dc2626" : (newAdmission ? t.danger : (hasUnreadUpdate ? t.accent : (hasConsultAnswer ? t.purple : t.primary)));
+    const background = critical.length || newAdmission ? "#fff7f7" : t.surface;
+    const clinicalStatus = critical.length ? "Kritik" : (p.loading ? "Veri alınıyor" : (p.errors?.length ? "Eksik veri" : "Stabil/izlem"));
+    const ta = [latestVital.sys, latestVital.dia].filter(Boolean).join("/");
+    const resp = latestVital.resp || extractInlineValue(freeText, [/\bSS\s*[:\-]?\s*(\d+)/i, /solunum\s*[:\-]?\s*(\d+)/i]);
+    const pain = latestVital.pain || extractInlineValue(freeText, [/ağr[ıi]\s*[:\-]?\s*(\d+\s*\/\s*10|\d+)/i, /\bVAS\s*[:\-]?\s*(\d+\s*\/\s*10|\d+)/i]);
+    const followItems = extractFollowItems(p).slice(0, 5);
+    const facts = [
+      ["BH", meta.bh],
+      ["KI", meta.ki],
+      ["GO", meta.go],
+      ["Alerji", meta.allergy],
+      ["ASA", meta.asa]
+    ];
+    const chips = [
+      operation ? statusPill(operation, t.primary2, t.tile, t.primary2) : "",
+      dietBadge ? statusPill(dietBadge, t.border, t.surface2, t.text) : "",
+      riskBadge ? statusPill(riskBadge, "#facc15", "#facc15", "#111827") : "",
+      newAdmission ? statusPill("Yeni yatış", t.danger, t.danger) : "",
+      hasConsultAnswer ? statusPill("Kons cevap", t.purple, t.purple) : "",
+      changeText ? statusPill(changeText, t.accent, t.accent, "#111827") : "",
+      critical.length ? statusPill(`KRİTİK: ${critical.join(", ")}`, "#dc2626", "#dc2626") : "",
+      isPaused ? statusPill("İzleme durdu", "#64748b", "#64748b") : "",
+      isPinned ? statusPill("Sabit", "#0ea5e9", "#0ea5e9") : "",
+      p.loading ? statusPill("yükleniyor", "#fbbf24", "#fef3c7", "#92400e") : ""
+    ].filter(Boolean).join("");
+
+    return `
+      <article data-card="${escapeHtml(key)}" draggable="true" aria-label="${escapeHtml(`${p.oda || "-"} ${p.adSoyad || "Hasta"} hasta kartı`)}" title="Kartı açmak için tıklayın; taşımak için sürükleyin." style="position:relative;border:1px solid ${t.border};border-left:5px solid ${borderColor};border-radius:10px;background:${background};color:${t.text};padding:9px;height:${state.cardHeight || 320}px;box-sizing:border-box;cursor:pointer;resize:vertical;overflow:auto;font-family:Arial,sans-serif;box-shadow:0 2px 8px rgba(15,23,42,.10);">
+        <div style="display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:start;border-bottom:1px solid ${t.border};padding-bottom:7px;">
+          <div style="min-width:0;">
+            <div style="display:flex;align-items:center;gap:8px;min-width:0;">
+              <div style="font-size:16px;font-weight:950;color:${t.primary2};line-height:1;white-space:nowrap;">${escapeHtml(doctorCode)}-${escapeHtml(p.oda || "-")}</div>
+              <div title="${escapeHtml(p.adSoyad || "")}" style="font-size:18px;font-weight:950;color:${t.text};line-height:1.05;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(p.adSoyad || "")}${ageSex ? `, ${escapeHtml(ageSex)}` : ""}</div>
+            </div>
+            <div title="${escapeHtml(diagnosis || "-")}" style="font-size:11px;color:${t.muted};margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(diagnosis || "-")}</div>
+            <div style="font-size:10px;color:${critical.length ? "#b91c1c" : "#15803d"};font-weight:900;margin-top:4px;">${critical.length ? "⚠" : "●"} ${escapeHtml(clinicalStatus)}${p.doktor ? ` · ${escapeHtml(p.doktor)}` : ""}</div>
+          </div>
+          <div style="display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end;max-width:210px;">${chips}
+            <button data-pin="${escapeHtml(key)}" title="Kartı sabitle" style="border:1px solid ${t.border};border-radius:6px;background:${isPinned ? "#0ea5e9" : t.surface};color:${isPinned ? "white" : t.text};cursor:pointer;">📌</button>
+            <button data-pause="${escapeHtml(key)}" title="Bu hastanın otomatik izlemesini aç/kapat" style="border:1px solid ${t.border};border-radius:6px;background:${isPaused ? "#64748b" : t.surface};color:${isPaused ? "white" : t.text};cursor:pointer;">${isPaused ? "▶" : "⏸"}</button>
+          </div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin-top:8px;">
+          ${vitalTileV16("TA", ta, "TA", "#0b3f91", t)}
+          ${vitalTileV16("Nabız", latestVital.pulse || "", "N", "#2563eb", t)}
+          ${vitalTileV16("Ateş", latestVital.temp || "", "C", "#dc2626", t)}
+          ${vitalTileV16("SpO2", latestVital.spo2 ? `${latestVital.spo2}%` : "", "O2", "#0891b2", t)}
+          ${vitalTileV16("SS", resp, "SS", "#0f766e", t)}
+          ${vitalTileV16("Ağrı", pain, "A", "#9333ea", t)}
+        </div>
+
+        <div style="display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px;margin-top:7px;">
+          ${labTilesHtmlV16(p.labs, t)}
+        </div>
+        <div style="font-size:10px;color:${t.muted};text-align:right;margin-top:3px;">Lab: ${escapeHtml(p.labDate || "zaman yok")} · 5 günlük trend için karta tıklayın</div>
+        ${glucoseCheckHtml(p, t)}
+
+        <div style="display:flex;gap:0;overflow:hidden;border:1px solid ${t.border};border-radius:9px;background:${t.surface};margin-top:8px;color:${t.text};font-size:11px;">
+          ${facts.map(([label, value]) => microInfo(label, clip(value || "-", 32), t)).join("")}
+        </div>
+
+        ${followItems.length ? `<div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:7px;">
+          ${followItems.map((x) => `<span style="font-size:11px;padding:5px 7px;border:1px solid ${t.border};border-radius:999px;background:${t.surface};color:${t.text};"><b style="color:${t.primary2};">${escapeHtml(x.label)}:</b> ${escapeHtml(x.value)}</span>`).join("")}
+        </div>` : ""}
+
+        <div style="border-radius:9px;overflow:hidden;margin-top:8px;font-size:11px;">
+          ${summaryRowHtmlV16("G", "Görüntüleme", radText, t)}
+          ${summaryRowHtmlV16("K", "Konsültasyon", consultText, t)}
+          ${summaryRowHtmlV16("O", "Order", orderText, t)}
+        </div>
+
+        ${meta.plan ? `<div style="display:grid;grid-template-columns:26px 80px minmax(0,1fr);gap:7px;align-items:center;margin-top:8px;border:1px solid ${t.accent};border-radius:10px;background:${t.surface2};padding:7px;">
+          <div style="width:24px;height:24px;border-radius:8px;background:${t.accent};color:#111827;display:grid;place-items:center;font-weight:950;">P</div>
+          <div style="font-size:12px;font-weight:950;color:${t.text};">Plan:</div>
+          <div style="font-size:12px;color:${t.text};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(meta.plan)}</div>
+        </div>` : ""}
+
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:7px;">
+          ${newOrder ? statusPill("Rx Yeni order", "#d97706", "#fff7ed", "#9a3412") : ""}
+          ${pendingConsultCount ? statusPill(`Kons bekliyor ${pendingConsultCount}`, "#d97706", "#fff7ed", "#9a3412") : ""}
+          ${criticalLab ? statusPill("Kritik laboratuvar", "#dc2626", "#fef2f2", "#991b1b") : ""}
+          ${dietBadge ? statusPill(`Diyet ${dietBadge}`, "#2563eb", "#eff6ff", "#1e3a8a") : ""}
+          ${meta.plan ? statusPill("Yapılacak işlem var", "#d97706", "#fff7ed", "#9a3412") : ""}
+          ${clean(p.clinical || "") ? statusPill("Vizit notu var", "#15803d", "#f0fdf4", "#166534") : statusPill("Vizit notu yok", "#64748b", "#f8fafc", "#475569")}
+        </div>
+
+        ${p.errors?.length ? `<pre style="margin:8px 0 0;white-space:pre-wrap;font:11px/1.3 Arial,sans-serif;color:${t.danger};background:#fff1f2;border:1px solid #fecdd3;border-radius:8px;padding:7px;">${escapeHtml(p.errors.slice(0, 3).join("\n"))}</pre>` : ""}
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;gap:8px;">
+          <button data-refresh="${escapeHtml(key)}" style="background:${t.primary};color:white;border:0;border-radius:8px;padding:6px 8px;cursor:pointer;font-size:11px;font-weight:900;">Detay Yenile</button>
+          <span style="font-size:11px;color:${t.muted};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml([p.updatedAt, p.yatis ? "Yatış " + shortDate(p.yatis) : "", p.doktor || ""].filter(Boolean).join(" | "))}</span>
+        </div>
+      </article>
+    `;
+  }
+
+  function openPatientDetailV16(key) {
+    const p = state.patients.find((x) => displayKey(x) === key);
+    if (!p) return;
+    state.selectedKey = key;
+    markPatientNotificationsRead(key);
+    acknowledgeConsults(p);
+    acknowledgePatientUpdates(p);
+    updateNotificationButton();
+
+    const t = activeTheme();
+    let modal = uiEl("fsl-patient-modal");
+    if (!modal) {
+      modal = uiDocument().createElement("div");
+      modal.id = "fsl-patient-modal";
+      uiDocument().body.appendChild(modal);
+    }
+
+    const visit = fullVisitText(p);
+    const dietInfo = compactDietInfo(p.diyet);
+    const meta = extractCardMeta(p);
+    const latestVital = (p.vitals || [])[0] || {};
+    const ta = [latestVital.sys, latestVital.dia].filter(Boolean).join("/");
+    const resp = latestVital.resp || "";
+    const pain = latestVital.pain || "";
+    const ageSex = patientAgeSex(p);
+    const operation = operationBadge(p);
+    const quickVitals = [
+      ["TA", ta],
+      ["Nabız", latestVital.pulse],
+      ["Ateş", latestVital.temp],
+      ["SpO2", latestVital.spo2 ? `${latestVital.spo2}%` : ""],
+      ["SS", resp],
+      ["Ağrı", pain]
+    ];
+
+    modal.setAttribute("role", "dialog");
+    modal.setAttribute("aria-label", "Hasta detay paneli");
+    modal.style.cssText = `
+      position:fixed;
+      top:0;
+      right:0;
+      bottom:0;
+      width:min(860px,96vw);
+      z-index:2147483647;
+      background:${t.bg};
+      color:${t.text};
+      border:1px solid ${t.border};
+      border-radius:14px 0 0 14px;
+      box-shadow:-18px 0 48px rgba(15,23,42,.32);
+      display:grid;
+      grid-template-rows:auto 1fr;
+      overflow:hidden;
+      font-family:Arial,sans-serif;
+    `;
+
+    modal.innerHTML = `
+      <header style="display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:center;padding:14px 16px;background:${t.header};color:${t.headerText};border-bottom:1px solid ${t.border};">
+        <div style="min-width:0;">
+          <div style="display:flex;align-items:center;gap:10px;min-width:0;">
+            <div style="font-size:24px;font-weight:950;line-height:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(p.oda || "-")} ${escapeHtml(p.adSoyad || "")}${ageSex ? `, ${escapeHtml(ageSex)}` : ""}</div>
+            ${operation ? statusPill(operation, t.primary, t.tile, t.primary2) : ""}
+            ${dietInfo.code && dietInfo.code !== "-" ? statusPill(dietInfo.code, t.border, t.surface2, t.text) : ""}
+          </div>
+          <div style="font-size:12px;color:${t.muted === "#475569" ? "#bfdbfe" : t.muted};margin-top:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml([p.birim, p.doktor].filter(Boolean).join(" | "))}</div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end;">
+          ${actionButtonHtml("fsl-modal-visit", "Vizit Kağıdı", t.accent)}
+          ${actionButtonHtml("fsl-modal-refresh", "Detay Yenile", t.primary)}
+          ${actionButtonHtml("fsl-modal-copy-labs", "Kan/Vital Tablo", "#7c3aed")}
+          ${actionButtonHtml("fsl-modal-copy-labs-text", "Kan/Vital Metin", "#0f766e")}
+          ${actionButtonHtml("fsl-modal-order-yarin", "Order Yarın", "#f97316")}
+          ${actionButtonHtml("fsl-modal-copy", "Kopyala", t.success)}
+          ${actionButtonHtml("fsl-modal-close", "Kapat", t.danger)}
+        </div>
+      </header>
+      <section style="display:grid;grid-template-columns:minmax(0,1fr) minmax(300px,.85fr);gap:12px;padding:12px;overflow:auto;background:${t.bg};">
+        <div style="display:grid;grid-template-rows:auto 1fr;gap:10px;min-width:0;min-height:0;">
+          <div style="display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:7px;">
+            ${quickVitals.map(([label, value]) => labTileV16(label, value || "-", "", false, t)).join("")}
+          </div>
+          <textarea id="fsl-modal-text" style="width:100%;height:100%;min-height:520px;background:#ffffff;color:#111827;border:1px solid ${t.border};border-radius:10px;padding:12px;font:13px/1.43 Arial,sans-serif;box-sizing:border-box;box-shadow:0 1px 2px rgba(15,23,42,.06);">${escapeHtml(visit)}</textarea>
+        </div>
+        <div style="display:grid;gap:10px;align-content:start;min-width:0;">
+          ${detailBlockV16("Klinik Özet", `TANI:${p.tani || "-"}\nYatış:${p.yatis || "-"}\nBH:${meta.bh || "-"}\nKI:${meta.ki || "-"}\nGO:${meta.go || "-"}\nAlerji:${meta.allergy || "-"}\nASA:${meta.asa || "-"}${meta.destination ? "\nYer:" + meta.destination : ""}`, t, "O")}
+          ${detailBlockV16("Diyet", `Kart:${dietInfo.code}${dietInfo.extra ? "\nEk:" + dietInfo.extra : ""}\nHam:${p.diyet || "-"}`, t, "D")}
+          ${detailBlockV16("Lab", `Tarih:${p.labDate || "-"}\n${labLine(p.labs) || "-"}`, t, "L")}
+          ${p.glucoseChecks?.length ? detailBlockV16("Glukotest", glucoseCheckText(p, 12), t, "G") : ""}
+          ${detailBlockV16("Görüntüleme", formatRadiology(p.radiology, 12, 1200) || "-", t, "G")}
+          ${detailBlockV16("Konsültasyon", (p.consults || []).map((x) => `${x.unit || "Kons"}${x.date ? " | " + x.date : ""}\n${x.answer || x.request || "-"}`).join("\n---\n") || "-", t, "K")}
+          ${detailBlockV16("Order", (p.orders || []).map((x) => `${x.name} ${x.dose}`).join("\n") || "-", t, "Rx")}
+          ${detailBlockV16("Hemşire / Devir", (p.nursing || []).map((x) => `${x.date || ""}\n${x.text || ""}`).join("\n---\n") || "-", t, "N")}
+          ${p.errors?.length ? detailBlockV16("Hatalar", p.errors.join("\n"), t, "!") : ""}
+          <details style="border:1px solid ${t.border};border-radius:10px;background:${t.surface};padding:9px;color:${t.text};">
+            <summary style="cursor:pointer;font-size:12px;font-weight:900;color:${t.primary2};">Teknik bilgiler</summary>
+            <pre style="white-space:pre-wrap;font:12px/1.35 Arial,sans-serif;margin:8px 0 0;color:${t.text};">BS:${escapeHtml(p.birimSevkId || "-")} HG:${escapeHtml(p.hastaGelisId || "-")} H:${escapeHtml(p.hastaId || "-")}</pre>
+          </details>
+        </div>
+      </section>
+    `;
+
+    uiEl("fsl-modal-close").onclick = () => modal.remove();
+    uiEl("fsl-modal-visit").onclick = async () => {
+      if (!p.labs || !Object.keys(p.labs).length || !p.consults?.length) {
+        await refreshPatientDetails(p);
+      }
+      const textArea = uiEl("fsl-modal-text");
+      if (textArea) textArea.value = visitPaperText(p);
+    };
+    uiEl("fsl-modal-refresh").onclick = async () => {
+      await refreshPatientDetails(p);
+      openPatientDetailV16(key);
+    };
+    uiEl("fsl-modal-copy").onclick = async () => {
+      const text = uiEl("fsl-modal-text").value;
+      await copyVisitPaper(p, text);
+    };
+    const copyLabsButton = uiEl("fsl-modal-copy-labs");
+    if (copyLabsButton) copyLabsButton.onclick = async () => {
+      if (!p.labs || !Object.keys(p.labs).length || !p.vitals?.length) {
+        await refreshPatientDetails(p);
+      }
+      await copyLabVitals(p);
+    };
+    const copyLabsTextButton = uiEl("fsl-modal-copy-labs-text");
+    if (copyLabsTextButton) copyLabsTextButton.onclick = async () => {
+      if (!p.labs || !Object.keys(p.labs).length || !p.vitals?.length) {
+        await refreshPatientDetails(p);
+      }
+      await copyLabVitalsPlain(p);
+    };
+    const orderTomorrowButton = uiEl("fsl-modal-order-yarin");
+    orderTomorrowButton?.remove();
+    if (orderTomorrowButton) orderTomorrowButton.onclick = async () => {
+      const textArea = uiEl("fsl-modal-text");
+      try {
+        orderTomorrowButton.textContent = "Order okunuyor...";
+        await fetchOrders(p);
+        const text = patientOrderTomorrowText(p);
+        if (textArea) textArea.value = text;
+        await copyPlainText(text);
+        state.lastMessage = "Order metni kopyalandı.";
+        const draft = buildPatientOrderDraft(p);
+        if (draft.missing?.length) {
+          const message = `AKTARIM DURDU: ${draft.missing.length} satırın FONET ham bilgisi eksik:\n- ${draft.missing.join("\n- ")}`;
+          if (textArea) textArea.value = `${text}\n\n---\n${message}`;
+          alert(message);
+          return;
+        }
+        if (!draft.eorderList.length) {
+          alert("Aktarılacak ilaç/takip orderı bulunamadı.");
+          return;
+        }
+        const ok = confirm(`${draft.targetDate} tarihine ${draft.eorderList.length} satır TASLAK order aktarılsın mı?\n\nE-imza veya Tedavi Uygula yapılmayacak. Aktarımdan sonra order ekranında kontrol et.`);
+        if (!ok) return;
+        orderTomorrowButton.textContent = "Aktarılıyor...";
+        const sent = await transferPatientOrdersTomorrow(p);
+        if (sent.notCopied?.length) {
+          alert(`${sent.targetDate} icin ${sent.eorderList.length}/${sent.expected || sent.eorderList.length} satir gonderildi.\n\nKopyalanmayan:\n- ${sent.notCopied.join("\n- ")}`);
+        }
+        state.lastMessage = `${draft.targetDate} için ${draft.eorderList.length} satır taslak order gönderildi.`;
+        if (textArea) textArea.value = `${text}\n\n---\n${draft.targetDate} için ${draft.eorderList.length} satır TASLAK order FONET'e gönderildi. Order ekranında tarihi ${draft.targetDate} yapıp kontrol et.`;
+        alert(`${draft.targetDate} için taslak order gönderildi. Lütfen order ekranında kontrol et.`);
+      } catch (e) {
+        alert(`Order yarın işlemi olmadı: ${e?.message || e}`);
+      } finally {
+        orderTomorrowButton.textContent = "Order Yarın";
+      }
+    };
+
+    state.detailAutoRefresh ||= {};
+    if (!(p.labs && Object.keys(p.labs).length) && !p.loading && !state.detailAutoRefresh[key]) {
+      state.detailAutoRefresh[key] = true;
+      refreshPatientDetails(p).then(() => {
+        if (uiEl("fsl-patient-modal") && state.selectedKey === key && p.labs && Object.keys(p.labs).length) openPatientDetailV16(key);
+      }).finally(() => {
+        delete state.detailAutoRefresh[key];
+      });
+    }
+  }
+
+  function escapeHtml(text) {
+    return String(text || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  function notificationTime(value) {
+    const date = new Date(Number(value || 0));
+    if (!Number.isFinite(date.getTime())) return "";
+    return date.toLocaleString("tr-TR", {
+      day: "2-digit",
+      month: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit"
+    });
+  }
+
+  function updateNotificationButton() {
+    const button = uiEl("fsl-notifications");
+    if (!button) return;
+    const count = unreadNotificationCount();
+    const t = activeTheme();
+    button.textContent = count ? `Bildirimler (${count})` : "Bildirimler";
+    button.style.background = count ? t.accent : "#334155";
+    button.style.color = count ? "#111827" : "#ffffff";
+  }
+
+  function renderNotificationBar() {
+    const bar = uiEl("fsl-notification-bar");
+    if (!bar) return;
+    const t = activeTheme();
+    const unread = unreadNotificationCount();
+    const recent = state.notificationLog
+      .filter(Boolean)
+      .slice()
+      .sort((a, b) => Number(b.at || 0) - Number(a.at || 0))
+      .slice(0, 8);
+
+    const chips = recent.map((item) => {
+      const style = notificationStyle(item.kind);
+      const read = Boolean(item.read);
+      const patient = [item.oda, item.adSoyad].filter(Boolean).join(" ") || "Hasta";
+      const countText = Number(item.count || 1) > 1 ? ` x${Number(item.count || 1)}` : "";
+      return `
+        <button type="button" data-notification-chip="${escapeHtml(item.id)}" title="${escapeHtml(item.detail || item.summary || item.title || "")}" style="min-width:220px;max-width:340px;height:42px;text-align:left;border:1px solid ${read ? t.border : style.color};border-left:5px solid ${read ? "#94a3b8" : style.color};border-radius:9px;background:${read ? t.surface : style.soft};color:${t.text};padding:6px 9px;cursor:pointer;display:grid;grid-template-rows:auto auto;gap:2px;overflow:hidden;opacity:${read ? ".78" : "1"};">
+          <span style="font-size:11px;font-weight:950;color:${read ? t.muted : style.color};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(item.title || style.title)}${escapeHtml(countText)} · ${escapeHtml(notificationTime(item.at))}</span>
+          <span style="font-size:12px;font-weight:900;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(patient)}: ${escapeHtml(item.summary || item.title || "Guncelleme")}</span>
+        </button>
+      `;
+    }).join("");
+
+    bar.innerHTML = `
+      <div style="display:flex;align-items:center;gap:8px;min-width:0;">
+        <button id="fsl-notification-read-all-inline" title="Tum bildirimleri okundu yap" style="height:32px;border:0;border-radius:8px;background:${unread ? t.accent : "#64748b"};color:${unread ? "#111827" : "white"};padding:0 10px;font-size:12px;font-weight:950;cursor:pointer;white-space:nowrap;">${unread ? `${unread} yeni` : "Bildirim yok"}</button>
+        <div style="display:flex;gap:7px;overflow:auto;padding-bottom:1px;min-width:0;scrollbar-width:thin;">
+          ${chips || `<div style="height:42px;display:flex;align-items:center;color:${t.muted};font-size:12px;border:1px dashed ${t.border};border-radius:9px;background:${t.surface};padding:0 12px;">Yeni bildirimler burada gorunecek.</div>`}
+        </div>
+      </div>
+    `;
+
+    Array.from(bar.querySelectorAll("[data-notification-chip]")).forEach((chip) => {
+      chip.onclick = () => {
+        const item = state.notificationLog.find((x) => x?.id === chip.dataset.notificationChip);
+        if (!item) return;
+        markNotificationRead(item.id);
+        render();
+        openPatientDetailV16(item.key);
+      };
+    });
+    const readAll = uiEl("fsl-notification-read-all-inline");
+    if (readAll) {
+      readAll.onclick = () => {
+        if (unread) markAllNotificationsRead();
+        else openNotificationCenter();
+        render();
+      };
+    }
+  }
+
+  function openNotificationCenter() {
+    removeUiEl("fsl-notification-center");
+    const doc = uiDocument();
+    const t = activeTheme();
+    const modal = doc.createElement("div");
+    modal.id = "fsl-notification-center";
+    modal.style.cssText = `
+      position:fixed;
+      inset:34px max(34px,calc((100vw - 980px)/2));
+      z-index:2147483647;
+      display:grid;
+      grid-template-rows:auto 1fr;
+      overflow:hidden;
+      border:1px solid ${t.border};
+      border-radius:14px;
+      background:${t.bg};
+      color:${t.text};
+      box-shadow:0 30px 90px rgba(15,23,42,.55);
+      font-family:Arial,sans-serif;
+    `;
+
+    const rows = state.notificationLog.map((item) => {
+      const style = notificationStyle(item.kind);
+      const read = Boolean(item.read);
+      return `
+        <article data-notification="${escapeHtml(item.id)}" style="border:1px solid ${read ? t.border : style.color};border-left:6px solid ${read ? "#94a3b8" : style.color};border-radius:10px;background:${read ? t.surface : style.soft};padding:11px;cursor:pointer;opacity:${read ? ".72" : "1"};">
+          <div style="display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:start;">
+            <div>
+              <div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap;">
+                ${read ? "" : `<span style="width:8px;height:8px;border-radius:50%;background:${style.color};display:inline-block;"></span>`}
+                <b style="font-size:14px;color:${read ? t.muted : style.color};">${escapeHtml(item.title || style.title)}</b>
+                <span style="font-size:11px;color:${t.muted};">${read ? "Okundu" : "Yeni"}</span>
+              </div>
+              <div style="font-size:17px;font-weight:950;color:${t.text};margin-top:5px;">${escapeHtml([item.oda, item.adSoyad].filter(Boolean).join(" ") || "Hasta")}</div>
+            </div>
+            <span style="font-size:11px;color:${t.muted};white-space:nowrap;">${escapeHtml(notificationTime(item.at))}</span>
+          </div>
+          <div style="font-size:13px;font-weight:900;color:${t.text};margin-top:7px;">${escapeHtml(item.summary || item.title || "Güncelleme")}</div>
+          ${item.detail ? `<pre style="margin:6px 0 0;white-space:pre-wrap;font:12px/1.38 Arial,sans-serif;color:${t.muted};max-height:180px;overflow:auto;">${escapeHtml(item.detail)}</pre>` : ""}
+          <div style="display:flex;justify-content:flex-end;gap:7px;margin-top:9px;">
+            <button data-notification-open="${escapeHtml(item.id)}" style="border:0;border-radius:7px;background:${style.color};color:white;padding:7px 12px;font-weight:900;cursor:pointer;">Aç</button>
+            <button data-notification-delete="${escapeHtml(item.id)}" style="border:0;border-radius:7px;background:${t.danger};color:white;padding:7px 12px;font-weight:900;cursor:pointer;">Sil</button>
+          </div>
+        </article>
+      `;
+    }).join("");
+
+    modal.innerHTML = `
+      <header style="display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:center;padding:13px 15px;background:${t.header};color:${t.headerText};border-bottom:1px solid ${t.border};">
+        <div>
+          <div style="font-size:20px;font-weight:950;">Bildirimler</div>
+          <div style="font-size:12px;color:#bfdbfe;margin-top:3px;">${unreadNotificationCount()} okunmamış · ${state.notificationLog.length} toplam</div>
+        </div>
+        <div style="display:flex;gap:7px;flex-wrap:wrap;justify-content:flex-end;">
+          <button id="fsl-notification-read-all" style="border:0;border-radius:7px;background:#475569;color:white;padding:8px 11px;font-weight:900;cursor:pointer;">Tümünü Okundu Yap</button>
+          <button id="fsl-notification-clear" style="border:0;border-radius:7px;background:${t.danger};color:white;padding:8px 11px;font-weight:900;cursor:pointer;">Temizle</button>
+          <button id="fsl-notification-close" style="border:0;border-radius:7px;background:#334155;color:white;padding:8px 11px;font-weight:900;cursor:pointer;">Kapat</button>
+        </div>
+      </header>
+      <section style="overflow:auto;padding:12px;display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:10px;align-content:start;">
+        ${rows || `<div style="grid-column:1/-1;text-align:center;color:${t.muted};padding:55px 15px;border:1px dashed ${t.border};border-radius:10px;background:${t.surface};">Henüz bildirim yok.</div>`}
+      </section>
+    `;
+    doc.body.appendChild(modal);
+
+    const openItem = (id) => {
+      const item = state.notificationLog.find((x) => x?.id === id);
+      if (!item) return;
+      markNotificationRead(id);
+      modal.remove();
+      render();
+      openPatientDetailV16(item.key);
+    };
+
+    Array.from(modal.querySelectorAll("[data-notification]")).forEach((card) => {
+      card.onclick = () => openItem(card.dataset.notification);
+    });
+    Array.from(modal.querySelectorAll("[data-notification-open]")).forEach((button) => {
+      button.onclick = (event) => {
+        event.stopPropagation();
+        openItem(button.dataset.notificationOpen);
+      };
+    });
+    Array.from(modal.querySelectorAll("[data-notification-delete]")).forEach((button) => {
+      button.onclick = (event) => {
+        event.stopPropagation();
+        deleteDesktopNotification(button.dataset.notificationDelete);
+        render();
+        openNotificationCenter();
+      };
+    });
+    uiEl("fsl-notification-read-all").onclick = () => {
+      markAllNotificationsRead();
+      render();
+      openNotificationCenter();
+    };
+    uiEl("fsl-notification-clear").onclick = () => {
+      clearDesktopNotifications();
+      render();
+      openNotificationCenter();
+    };
+    uiEl("fsl-notification-close").onclick = () => modal.remove();
+  }
+
+  function render() {
+    const grid = uiEl("fsl-grid");
+    const status = uiEl("fsl-status");
+    const endpoints = uiEl("fsl-endpoints");
+    const notificationBar = uiEl("fsl-notification-bar");
+    const output = uiEl("fsl-output");
+    const summaryStrip = uiEl("fsl-service-strip");
+    const lastUpdated = uiEl("fsl-last-updated");
+    const clinicFilter = uiEl("fsl-clinic-filter");
+    const t = activeTheme();
+    if (!grid) return;
+
+    state.gridScroll = Number.isFinite(grid.scrollTop) ? grid.scrollTop : (state.gridScroll || 0);
+    Array.from(grid.querySelectorAll("article[data-card]")).forEach((card) => {
+      if (card.dataset.card) state.cardScroll[card.dataset.card] = card.scrollTop || 0;
+    });
+
+    if (summaryStrip) summaryStrip.innerHTML = serviceSummaryHtml();
+    if (lastUpdated) lastUpdated.textContent = new Date().toLocaleTimeString("tr-TR", { hour:"2-digit", minute:"2-digit" });
+    if (clinicFilter) {
+      const selected = state.uiFilters?.clinic || "";
+      const clinics = [...new Set((state.patients || []).map((p) => clean(p.birim || p.servis || p.klinik)).filter(Boolean))]
+        .sort((a, b) => a.localeCompare(b, "tr", { sensitivity:"base", numeric:true }));
+      const signature = clinics.join("|");
+      if (clinicFilter.dataset.signature !== signature) {
+        clinicFilter.innerHTML = '<option value="">Tüm klinikler</option>' + clinics.map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join("");
+        clinicFilter.dataset.signature = signature;
+      }
+      clinicFilter.value = selected;
+    }
+    const filteredPatients = state.patients.filter((p) => patientMatchesSearch(p) && patientMatchesUiFilters(p));
+    if (status) {
+      status.textContent = state.searchText
+        ? `${filteredPatients.length}/${state.patients.length} hasta`
+        : (state.activeView === "replacement" ? `${filteredPatients.length} hasta · replasman takibi` : (state.lastMessage || `${state.patients.length} hasta`));
+    }
+    const replacementMode = state.activeView === "replacement";
+    if (notificationBar) notificationBar.style.display = replacementMode ? "none" : "block";
+    if (output) output.style.display = replacementMode ? "none" : "block";
+    grid.style.padding = replacementMode ? "6px" : "10px";
+    grid.style.gap = replacementMode ? "5px" : "10px";
+    grid.style.display = replacementMode ? "block" : "grid";
+    grid.style.overflowY = "auto";
+    grid.style.gridTemplateColumns = replacementMode ? "1fr" : `repeat(auto-fill,minmax(${state.cardWidth || 290}px,1fr))`;
+    const patientKeys = filteredPatients.map(displayKey);
+    const layoutSignature = JSON.stringify([state.activeView,state.searchText,state.uiFilters,state.sortMode,state.cardWidth,state.cardHeight,patientKeys]);
+    const cardSignature = (p) => JSON.stringify([p.updatedAt,p.loading,p.tani,p.diyet,p.clinical,p.labDate,p.vitals,p.labs,p.orders,p.consults,p.radiology,p.changedLabels,p.errors,(state.pinnedKeys || []).includes(displayKey(p)),(state.pausedKeys || []).includes(displayKey(p))]);
+    if (replacementMode || layoutSignature !== state.lastLayoutSignature) {
+      grid.innerHTML = replacementMode
+        ? replacementViewHtml(filteredPatients)
+        : consultTrackingCardV16() + (filteredPatients.length
+          ? filteredPatients.map(patientCardV16).join("")
+          : `<div style="grid-column:1/-1;color:${t.muted};padding:24px;text-align:center;border:1px dashed ${t.border};border-radius:10px;background:${t.surface};">${state.searchText ? "Aramaya uygun hasta bulunamadı." : `Henüz hasta bulunamadı. FONET hasta listesi ekranda açıkken "Servisi Topla" düğmesine bas.`}</div>`);
+      state.cardRenderSignatures = Object.fromEntries(filteredPatients.map((p) => [displayKey(p), cardSignature(p)]));
+    } else {
+      const tracker = grid.querySelector("#fsl-consult-tracker");
+      if (tracker) tracker.outerHTML = consultTrackingCardV16();
+      filteredPatients.forEach((p) => {
+        const key = displayKey(p); const signature = cardSignature(p);
+        if (state.cardRenderSignatures[key] === signature) return;
+        const currentCard = Array.from(grid.querySelectorAll("article[data-card]")).find((card) => card.dataset.card === key);
+        if (currentCard) currentCard.outerHTML = patientCardV16(p);
+        state.cardRenderSignatures[key] = signature;
+      });
+    }
+    state.lastLayoutSignature = layoutSignature;
+    state.lastGridSignature = layoutSignature;
+    grid.scrollTop = state.gridScroll || 0;
+
+    Array.from(grid.querySelectorAll("button[data-refresh]")).forEach((btn) => {
+      btn.onclick = (event) => {
+        event.stopPropagation();
+        const p = state.patients.find((x) => displayKey(x) === btn.dataset.refresh);
+        if (p) refreshPatientDetails(p);
+      };
+    });
+
+    Array.from(grid.querySelectorAll("button[data-pin]")).forEach((btn) => {
+      btn.onclick = (event) => {
+        event.stopPropagation();
+        const key = btn.dataset.pin;
+        state.pinnedKeys = state.pinnedKeys.includes(key) ? state.pinnedKeys.filter((x) => x !== key) : [...state.pinnedKeys, key];
+        saveSmartSettings();
+        render();
+      };
+    });
+
+    Array.from(grid.querySelectorAll("button[data-pause]")).forEach((btn) => {
+      btn.onclick = (event) => {
+        event.stopPropagation();
+        const key = btn.dataset.pause;
+        state.pausedKeys = state.pausedKeys.includes(key) ? state.pausedKeys.filter((x) => x !== key) : [...state.pausedKeys, key];
+        saveSmartSettings();
+        render();
+      };
+    });
+
+    Array.from(grid.querySelectorAll("[data-open-patient]")).forEach((btn) => {
+      btn.onclick = (event) => {
+        event.stopPropagation();
+        openPatientDetailV16(btn.dataset.openPatient);
+      };
+    });
+
+    Array.from(grid.querySelectorAll("button[data-quick-order-patient]")).forEach((button) => {
+      button.onclick = (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const p = state.patients.find((item) => displayKey(item) === button.dataset.quickOrderPatient);
+        const electrolyte = patientElectrolytes(p).find((item) => item.key === button.dataset.quickOrderElectrolyte);
+        openHizliOrderForElectrolyte(p, electrolyte);
+      };
+    });
+
+    Array.from(grid.querySelectorAll("input[data-replacement-note]")).forEach((input) => {
+      input.oninput = () => {
+        state.replacementNotes[input.dataset.replacementNote] = input.value || "";
+        saveSmartSettings();
+      };
+      input.onclick = (event) => event.stopPropagation();
+    });
+
+    Array.from(grid.querySelectorAll("button[data-replacement-done]")).forEach((button) => {
+      button.onclick = (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const key = button.dataset.replacementDone;
+        state.replacementDone[key] = !state.replacementDone[key];
+        saveSmartSettings();
+        render();
+      };
+    });
+
+    const replacementRefresh = uiEl("fsl-replacement-refresh");
+    if (replacementRefresh) replacementRefresh.onclick = () => refreshAllDetails(true, "replacement");
+
+    Array.from(grid.querySelectorAll("article[data-card]")).forEach((card) => {
+      card.scrollTop = state.cardScroll?.[card.dataset.card] || 0;
+      card.onscroll = () => {
+        state.cardScroll[card.dataset.card] = card.scrollTop || 0;
+      };
+      card.onmouseenter = () => {
+        const rect = card.getBoundingClientRect();
+        const win = uiWindow();
+        const x = rect.left < win.innerWidth * 0.28 ? "left" : (rect.right > win.innerWidth * 0.72 ? "right" : "center");
+        const y = rect.top < win.innerHeight * 0.42 ? "top" : "bottom";
+        card.style.transformOrigin = `${x} ${y}`;
+        card.style.transform = "scale(1.015)";
+        card.style.zIndex = "2147483600";
+        card.style.boxShadow = `0 8px 20px rgba(15,23,42,.18)`;
+        card.style.outline = `1px solid ${t.primary}`;
+        card.style.outlineOffset = "1px";
+      };
+      card.onmouseleave = () => {
+        card.style.transform = "";
+        card.style.zIndex = "";
+        card.style.boxShadow = activeTheme().shadow;
+        card.style.outline = "";
+        card.style.outlineOffset = "";
+      };
+      card.ondragstart = (event) => {
+        state.dragCardKey = card.dataset.card;
+        try {
+          event.dataTransfer.effectAllowed = "move";
+          event.dataTransfer.setData("text/plain", card.dataset.card);
+        } catch (e) {}
+        card.style.opacity = "0.55";
+      };
+      card.ondragend = () => {
+        state.dragCardKey = "";
+        card.style.opacity = "";
+        Array.from(grid.querySelectorAll("article[data-card]")).forEach((x) => {
+          x.style.outline = "";
+        });
+      };
+      card.ondragover = (event) => {
+        if (!state.dragCardKey || state.dragCardKey === card.dataset.card) return;
+        event.preventDefault();
+        card.style.outline = "2px solid #38bdf8";
+        card.style.outlineOffset = "2px";
+      };
+      card.ondragleave = () => {
+        card.style.outline = "";
+      };
+      card.ondrop = (event) => {
+        event.preventDefault();
+        card.style.outline = "";
+        const from = state.dragCardKey || event.dataTransfer?.getData("text/plain");
+        movePatientCard(from, card.dataset.card);
+      };
+      card.onclick = () => openPatientDetailV16(card.dataset.card);
+    });
+
+    const grouped = state.requests.reduce((acc, r) => {
+      acc[r.type] = (acc[r.type] || 0) + 1;
+      return acc;
+    }, {});
+    if (endpoints) {
+      const m = state.metrics;
+      const nextSec = m.nextCycleAt ? Math.max(0, Math.ceil((m.nextCycleAt - Date.now()) / 1000)) : 0;
+      endpoints.textContent = `Tur:${m.cycles} | İlerleme:${m.processed}/${m.total} | Son:${m.lastCycleMs}ms | Sorgu:${m.requests} | Hata:${m.errors} | Güncel:${m.updated} | Sonraki:${nextSec}sn`;
+    }
+    updateNotificationButton();
+    renderNotificationBar();
+    sendBridgeUpdate();
+  }
+
+  function makePanel() {
+    openPanelWindow();
+    removeUiEl("vizit-sade-live-panel");
+    state.lastLayoutSignature = "";
+    state.cardRenderSignatures = {};
+    const doc = uiDocument();
+    const win = uiWindow();
+    const t = activeTheme();
+    const panel = doc.createElement("div");
+    panel.id = "vizit-sade-live-panel";
+    const panelShell = state.popupMode ? `
+      position:fixed;
+      inset:0;
+      width:100vw;
+      height:100vh;
+      z-index:2147483647;
+      background:#f1f5f9;
+      color:#0f172a;
+      font-family:Arial,sans-serif;
+      display:grid;
+      grid-template-rows:auto auto auto auto 1fr auto;
+      overflow:hidden;
+    ` : `
+      position:fixed;
+      top:90px;
+      left:420px;
+      width:1050px;
+      height:720px;
+      max-width:calc(100vw - 24px);
+      max-height:calc(100vh - 24px);
+      z-index:2147483647;
+      background:#f1f5f9;
+      color:#0f172a;
+      border:1px solid #94a3b8;
+      border-radius:10px;
+      box-shadow:0 22px 55px rgba(15,23,42,.35);
+      font-family:Arial,sans-serif;
+      display:grid;
+      grid-template-rows:auto auto auto auto 1fr auto;
+      overflow:hidden;
+      resize:both;
+      min-width:760px;
+      min-height:480px;
+    `;
+    panel.style.cssText = panelShell;
+    panel.style.background = t.bg;
+    panel.style.color = t.text;
+    panel.style.borderColor = t.border;
+    panel.style.boxShadow = t.shadow;
+
+    panel.innerHTML = `
+      <style>
+        #vizit-sade-live-panel *{box-sizing:border-box}
+        #vizit-sade-live-panel button,#vizit-sade-live-panel select,#vizit-sade-live-panel input{font-family:Arial,sans-serif}
+        #vizit-sade-live-panel .vs-btn{height:32px;border:1px solid ${t.border};border-radius:7px;padding:0 9px;font-weight:800;cursor:pointer;white-space:nowrap}
+        #vizit-sade-live-panel .vs-filter[aria-pressed="true"]{background:${t.primary2}!important;color:#fff!important;border-color:${t.primary2}!important}
+        #vizit-sade-live-panel .vs-summary{display:flex;gap:7px;align-items:center;overflow-x:auto;padding:6px 10px;background:${t.surface};border-bottom:1px solid ${t.border}}
+        #vizit-sade-live-panel .vs-summary-item{display:inline-flex;gap:6px;align-items:center;border-left:3px solid;padding:3px 8px;background:${t.surface2};border-radius:5px;white-space:nowrap;font-size:11px;color:${t.text}}
+        #vizit-sade-live-panel .vs-summary-item strong{font-size:13px}
+        #vizit-sade-live-panel .vs-tools{position:absolute;right:8px;top:38px;z-index:30;width:280px;padding:9px;border:1px solid ${t.border};border-radius:9px;background:${t.surface};box-shadow:0 12px 28px rgba(15,23,42,.22)}
+        #vizit-sade-live-panel .vs-tools-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+        @media(max-width:900px){#vizit-sade-live-panel .vs-header{grid-template-columns:1fr!important}#vizit-sade-live-panel .vs-header-mid{order:3}#vizit-sade-live-panel .vs-controls{overflow-x:auto}#fsl-patient-modal section{grid-template-columns:1fr!important}}
+      </style>
+      <header id="fsl-drag-handle" class="vs-header" style="display:grid;grid-template-columns:minmax(210px,.7fr) minmax(280px,1.2fr) auto;align-items:center;gap:10px;padding:7px 9px;background:${t.header};color:${t.headerText};cursor:${state.popupMode ? "default" : "move"};user-select:none;border-bottom:1px solid ${t.border};">
+        <div style="min-width:0;">
+          <b style="font-size:14px;">FONET Servis Canlı Paneli · VİZİT SADE V1.1</b>
+          <div style="font-size:10px;color:#bfdbfe;margin-top:2px;"><span id="fsl-status">hazır</span> · Son güncelleme <span id="fsl-last-updated">--:--</span></div>
+        </div>
+        <div class="vs-header-mid" style="display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;border:1px solid ${t.border};border-radius:7px;background:${t.surface};overflow:hidden;min-width:0;">
+          <span style="padding:0 8px;color:${t.primary2};font-size:12px;font-weight:950;">Ara</span>
+          <input id="fsl-search" value="${escapeHtml(state.searchText)}" placeholder="Hasta, oda, tanı, doktor veya klinik" style="width:100%;height:32px;border:0;outline:0;background:transparent;color:${t.text};font-size:12px;" />
+          <button id="fsl-search-clear" title="Aramayı temizle" style="width:32px;height:32px;border:0;background:transparent;color:${t.muted};font-size:18px;cursor:pointer;">×</button>
+        </div>
+        <div style="display:flex;gap:5px;align-items:center;justify-content:flex-end;position:relative;">
+          <button id="fsl-details" class="vs-btn" style="background:${t.primary2};color:#fff;border-color:${t.primary2};" title="Tüm hasta ayrıntılarını yenile">↻ Yenile</button>
+          <button id="fsl-sound" class="vs-btn" title="Bildirim sesi" style="background:${state.soundEnabled ? t.accent : "#64748b"};color:${state.soundEnabled ? "#111827" : "white"};">${state.soundEnabled ? "🔊 Açık" : "🔇 Kapalı"}</button>
+          <button id="fsl-critical-settings" class="vs-btn" title="Kritik vital sınırları" style="background:#b91c1c;color:#fff;border-color:#b91c1c;">⚠ Alarm</button>
+          <select id="fsl-theme" title="Açık/koyu tema" class="vs-btn" style="background:${t.surface};color:${t.text};">${themeOptionsHtml()}</select>
+          <details id="fsl-tools-menu" style="position:relative;">
+            <summary class="vs-btn" style="display:flex;align-items:center;background:#334155;color:#fff;list-style:none;">Araçlar ▾</summary>
+            <div class="vs-tools"><div class="vs-tools-grid">
+              <button id="fsl-collect" class="vs-btn" style="background:${t.primary};color:#fff;">Servisi Topla</button>
+              <button id="fsl-watch" class="vs-btn" style="background:${t.success};color:#fff;">Otomatik İzle</button>
+              <button id="fsl-copy" class="vs-btn" style="background:#475569;color:#fff;">Metin Dışa Aktar</button>
+              <button id="fsl-card-smaller" class="vs-btn" style="background:${t.surface2};color:${t.text};">Kart −</button>
+              <button id="fsl-card-bigger" class="vs-btn" style="background:${t.surface2};color:${t.text};">Kart +</button>
+              <button id="fsl-close" class="vs-btn" style="background:${t.danger};color:#fff;">Paneli Kapat</button>
+            </div><div id="fsl-export-tools" style="margin-top:7px;"></div></div>
+          </details>
+        </div>
+      </header>
+      <section class="vs-controls" style="display:flex;gap:6px;align-items:center;padding:6px 9px;background:${t.surface2};border-bottom:1px solid ${t.border};white-space:nowrap;overflow-x:auto;">
+        <select id="fsl-clinic-filter" class="vs-btn" style="background:${t.surface};color:${t.text};"><option value="">Tüm klinikler</option></select>
+        <select id="fsl-sort-mode" class="vs-btn" title="Kart sıralaması" style="background:${t.surface};color:${t.text};">
+          <option value="fonet"${state.sortMode === "fonet" ? " selected" : ""}>FONET sırası</option><option value="priority"${state.sortMode === "priority" ? " selected" : ""}>Kritikler önce</option><option value="room"${state.sortMode === "room" ? " selected" : ""}>Oda sırası</option><option value="name"${state.sortMode === "name" ? " selected" : ""}>İsim sırası</option>
+        </select>
+        ${[["critical","⚠ Kritik"],["order","Rx Yeni order"],["consult","Kons bekliyor"],["lab","Kritik lab"],["postop","Postop"]].map(([key,label]) => `<button class="vs-btn vs-filter" data-filter="${key}" aria-pressed="${state.uiFilters?.[key] ? "true" : "false"}" style="background:${t.surface};color:${t.text};">${label}</button>`).join("")}
+        <span style="flex:1;"></span>
+        <button id="fsl-view-patients" class="vs-btn" style="background:${state.activeView === "patients" ? t.primary : "#64748b"};color:#fff;">Vizit</button>
+        <button id="fsl-view-replacement" class="vs-btn" style="background:${state.activeView === "replacement" ? "#d97706" : "#64748b"};color:#fff;">Replasman</button>
+        <button id="fsl-notifications" class="vs-btn" style="background:#334155;color:#fff;">Bildirimler</button>
+      </section>
+      <section id="fsl-service-strip" class="vs-summary">${serviceSummaryHtml()}</section>
+      <section id="fsl-notification-bar" style="min-height:40px;padding:5px 9px;background:${t.bg};border-bottom:1px solid ${t.border};overflow:hidden;"></section>
+      <section id="fsl-grid" style="overflow:auto;padding:8px;display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:8px;align-content:start;background:${t.bg};"></section>
+      <textarea id="fsl-output" style="height:48px;border:0;border-top:1px solid ${t.border};padding:6px;font:10px Consolas,monospace;box-sizing:border-box;background:${t.surface};color:${t.text};" placeholder="Dışa aktarım veya tanı bilgisi burada görünür."></textarea>
+    `;
+
+    doc.body.appendChild(panel);
+
+    const themeSelect = uiEl("fsl-theme");
+    if (themeSelect) {
+      themeSelect.onchange = () => setTheme(themeSelect.value);
+    }
+
+    const sortSelect = uiEl("fsl-sort-mode");
+    if (sortSelect) sortSelect.onchange = () => {
+      state.sortMode = sortSelect.value || "fonet";
+      saveSmartSettings();
+      state.patients = sortPatientsForDisplay(state.patients);
+      render();
+    };
+
+    const clinicFilter = uiEl("fsl-clinic-filter");
+    if (clinicFilter) clinicFilter.onchange = () => {
+      state.uiFilters.clinic = clinicFilter.value || "";
+      state.gridScroll = 0;
+      state.lastGridSignature = "";
+      render();
+    };
+    Array.from(panel.querySelectorAll("button[data-filter]")).forEach((button) => {
+      button.onclick = () => {
+        const key = button.dataset.filter;
+        state.uiFilters[key] = !state.uiFilters[key];
+        button.setAttribute("aria-pressed", state.uiFilters[key] ? "true" : "false");
+        state.gridScroll = 0;
+        state.lastGridSignature = "";
+        render();
+      };
+    });
+
+    uiEl("fsl-critical-settings").onclick = () => {
+      const t0 = state.thresholds;
+      const value = prompt("Kritik sınırlar: Ateş üstü, SpO2 altı, Nabız altı, Nabız üstü, Sistolik altı, Sistolik üstü", [t0.tempHigh,t0.spo2Low,t0.pulseLow,t0.pulseHigh,t0.sysLow,t0.sysHigh].join(","));
+      if (!value) return;
+      const nums = value.split(",").map(numberValue);
+      if (nums.length !== 6 || nums.some((x) => x == null)) return alert("Altı sayısal değer girin.");
+      [t0.tempHigh,t0.spo2Low,t0.pulseLow,t0.pulseHigh,t0.sysLow,t0.sysHigh] = nums;
+      saveSmartSettings();
+      render();
+    };
+
+    const soundButton = uiEl("fsl-sound");
+    if (soundButton) {
+      soundButton.onclick = () => setSoundEnabled(!state.soundEnabled);
+    }
+
+    const searchInput = uiEl("fsl-search");
+    if (searchInput) {
+      searchInput.oninput = () => {
+        if (state.searchTimer) window.clearTimeout(state.searchTimer);
+        state.searchTimer = window.setTimeout(() => {
+          state.searchText = searchInput.value || "";
+          state.gridScroll = 0;
+          state.lastGridSignature = "";
+          render();
+        }, 180);
+      };
+    }
+    uiEl("fsl-search-clear").onclick = () => {
+      state.searchText = "";
+      if (searchInput) {
+        searchInput.value = "";
+        searchInput.focus();
+      }
+      state.gridScroll = 0;
+      state.lastGridSignature = "";
+      render();
+    };
+    uiEl("fsl-notifications").onclick = openNotificationCenter;
+    uiEl("fsl-view-patients").onclick = () => {
+      state.activeView = "patients";
+      state.gridScroll = 0;
+      uiEl("fsl-view-patients").style.background = activeTheme().primary;
+      uiEl("fsl-view-replacement").style.background = "#64748b";
+      render();
+    };
+    uiEl("fsl-view-replacement").onclick = () => {
+      state.activeView = "replacement";
+      state.gridScroll = 0;
+      uiEl("fsl-view-patients").style.background = "#64748b";
+      uiEl("fsl-view-replacement").style.background = "#d97706";
+      render();
+      if (state.patients.some((p) => !p.labs || !Object.keys(p.labs).length)) refreshAllDetails(true, "replacement");
+    };
+
+    panel.addEventListener("pointerdown", () => {
+      unlockNotificationSound();
+    }, { once: true });
+
+    const handle = uiEl("fsl-drag-handle");
+    handle.onmousedown = (event) => {
+      if (state.popupMode) return;
+      if (/BUTTON|INPUT|SELECT|SUMMARY|DETAILS/.test(event.target.tagName)) return;
+      const rect = panel.getBoundingClientRect();
+      state.drag = {
+        startX: event.clientX,
+        startY: event.clientY,
+        left: rect.left,
+        top: rect.top
+      };
+      event.preventDefault();
+    };
+
+    win.addEventListener("mousemove", (event) => {
+      if (!state.drag) return;
+      const nextLeft = state.drag.left + event.clientX - state.drag.startX;
+      const nextTop = state.drag.top + event.clientY - state.drag.startY;
+      const maxLeft = win.innerWidth - Math.min(panel.offsetWidth, win.innerWidth - 24) - 12;
+      const maxTop = win.innerHeight - 48;
+      panel.style.left = `${Math.max(12, Math.min(nextLeft, Math.max(12, maxLeft)))}px`;
+      panel.style.top = `${Math.max(12, Math.min(nextTop, maxTop))}px`;
+      panel.style.right = "auto";
+      panel.style.bottom = "auto";
+    });
+
+    win.addEventListener("mouseup", () => {
+      state.drag = null;
+    });
+
+    uiEl("fsl-collect").onclick = () => {
+      collectServicePatients();
+      uiEl("fsl-output").value = exportPatients();
+    };
+
+    uiEl("fsl-card-smaller").onclick = () => {
+      state.cardWidth = Math.max(240, (state.cardWidth || 290) - 30);
+      state.cardHeight = Math.max(260, (state.cardHeight || 320) - 20);
+      saveSmartSettings();
+      render();
+    };
+
+    uiEl("fsl-card-bigger").onclick = () => {
+      state.cardWidth = Math.min(440, (state.cardWidth || 290) + 30);
+      state.cardHeight = Math.min(520, (state.cardHeight || 320) + 20);
+      saveSmartSettings();
+      render();
+    };
+
+    uiEl("fsl-details").onclick = () => {
+      refreshAllDetails(true, "manual");
+    };
+
+    uiEl("fsl-watch").onclick = () => {
+      collectServicePatients();
+      startAutoMonitor();
+      if (!state.bootstrapComplete) bootstrapFullRefresh();
+      else refreshAllDetails(false, "monitor");
+      render();
+    };
+
+    uiEl("fsl-copy").onclick = copyExport;
+    uiEl("fsl-close").onclick = restore;
+    render();
+  }
+
+  patchNetwork();
+  makePanel();
+  collectServicePatients();
+  startAutoMonitor();
+  window.setTimeout(() => {
+    if (state.active) bootstrapFullRefresh();
+  }, 600);
+
+  const extTimer = window.setInterval(() => {
+    if (!state.active) {
+      window.clearInterval(extTimer);
+      return;
+    }
+    patchNetwork();
+    if (state.original.xhrOpen && state.original.extRequest) window.clearInterval(extTimer);
+  }, 10000);
+
+  /* VİZİT SADE: Fonet Canlı Vizit tabanlı toplu belge dışa aktarımı */
+  function aoeEsc(v) {
+    return String(v == null ? "" : v).replace(/[&<>"']/g, (ch) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" })[ch]);
+  }
+
+  function aoeDate(v) {
+    const m = String(v || "").match(/(\d{2})[./-](\d{2})[./-](\d{4})/);
+    return m ? m[1] + "." + m[2] + "." + m[3] : clean(v);
+  }
+
+  function aoeDrugName(value) {
+    const original = clean(value).toLocaleUpperCase("tr-TR");
+    const ingredientNames = [
+      "METRONİDAZOL", "METRONIDAZOL", "SEFTRİAKSON", "SEFTRIAKSON",
+      "PİPERASİLİN", "PIPERASILIN", "TAZOBAKTAM", "MEROPENEM",
+      "VANKOMİSİN", "VANKOMISIN", "PARASETAMOL", "ALBÜMİN", "ALBUMIN"
+    ];
+    const ingredient = ingredientNames.find((name) => original.includes(name));
+    if (ingredient) return ingredient.replace("METRONIDAZOL", "METRONİDAZOL").replace("SEFTRIAKSON", "SEFTRİAKSON");
+    const firstWord = original.split(/\s+/)[0] || "İLAÇ";
+    const strength = original.match(/\b\d+(?:[.,]\d+)?\s*(?:MG|MCG|G|ANTI-XA\s*IU|IU)\b/i)?.[0] || "";
+    const normalizedBrand = firstWord === "ARMASEFT" ? "ARMASEF" : firstWord;
+    return [normalizedBrand, /^OKSAPAR$/i.test(normalizedBrand) ? strength : ""].filter(Boolean).join(" ");
+  }
+
+  function aoeOrderLines(orders) {
+    const seen = new Set();
+    const rows = [];
+    (orders || []).forEach((x) => {
+      const name = aoeDrugName(x.name || x.adi || "");
+      const dose = clean(x.dose || x.doz || x.usage || x.kullanimSekli || x.amount || x.miktar || "—");
+      const start = aoeDate(x.start || x.startDate || x.baslangicTarihi) || "—";
+      const key = [name, dose, start].join("|");
+      if (!name || seen.has(key)) return;
+      seen.add(key);
+      rows.push({ name, dose, start });
+    });
+    return rows.map((x, index) =>
+      '<div class="order-row"><b>' + (index + 1) + '. ' + aoeEsc(x.name) + '</b> — Doz: ' +
+      aoeEsc(x.dose) + ' — Başlangıç: ' + aoeEsc(x.start) + '</div>'
+    ).join("") || "—";
+  }
+
+  function aoeOrderData(orders) {
+    const seen = new Set();
+    return (orders || []).map((x) => {
+      const row = {
+        name: aoeDrugName(x.name || x.adi || ""),
+        dose: clean(x.dose || x.doz || x.usage || x.kullanimSekli || x.amount || x.miktar || "—"),
+        start: aoeDate(x.start || x.startDate || x.baslangicTarihi) || "—"
+      };
+      const key = [row.name, row.dose, row.start].join("|");
+      if (!row.name || seen.has(key)) return null;
+      seen.add(key);
+      return row;
+    }).filter(Boolean);
+  }
+
+  function aoeConsultFacts(p) {
+    const answers = (p.consults || []).map((x) => cleanMultiline(x.answer || "")).filter(Boolean);
+    const text = answers.join("\n");
+    const field = (label) => {
+      const pattern = new RegExp("(?:^|\\n|[.;])\\s*" + label + "\\s*[:\\-]\\s*([^\\n;]+?)(?=\\s+(?:BH|Kİ|KI|GO|ASA)\\s*[:\\-]|$)", "i");
+      return clean(text.match(pattern)?.[1] || "");
+    };
+    let diagnosis = "";
+    for (const answer of answers) {
+      const sentences = answer.split(/(?<=[.!?])\s+|\n+/).map(clean).filter(Boolean);
+      for (const sentence of sentences) {
+        const match = sentence.match(/(?:hastanın\s+)?(.{3,100}?)\s+(tanısı|tanisi|nedeni)\s+ile\s+(?:yatışı|yatisi|yatış|yatis)\s+(?:uygundur|uygun)/i);
+        if (match) {
+          diagnosis = clean((match[1] + " " + match[2]).replace(/^(hasta|hastanın|mevcut)\s+/i, ""));
+          break;
+        }
+      }
+      if (diagnosis) break;
+    }
+    return {
+      diagnosis,
+      bh: field("BH"),
+      ki: field("K(?:İ|I)"),
+      go: field("GO")
+    };
+  }
+
+  function aoeSurgeryInfo(p) {
+    const surgeries = (p.surgeries || []).filter((x) => surgeryDateMs(x));
+    if (!surgeries.length) return { date:"", badge:operationBadge(p) || "", operation:"" };
+    const now = Date.now();
+    const past = surgeries.filter((x) => surgeryDateMs(x) <= now).sort((a,b) => surgeryDateMs(b) - surgeryDateMs(a));
+    const future = surgeries.filter((x) => surgeryDateMs(x) > now).sort((a,b) => surgeryDateMs(a) - surgeryDateMs(b));
+    const selected = past[0] || future[0];
+    const performed = past.find((x) => clean(x.name || "") && (x.startDate || x.endDate)) ||
+      past.find((x) => clean(x.name || "")) || null;
+    return {
+      date: aoeDate(selected.startDate || selected.baslangicTarihi || selected.endDate || selected.bitisTarihi || selected.requestDate || selected.istekTarihi),
+      badge: operationBadge(p) || "",
+      operation: clean(performed?.name || "")
+    };
+  }
+
+  function aoeImagingName(item) {
+    const generic = /^(görüntüleme|goruntuleme|radyoloji|tetkik|inceleme)$/i;
+    const direct = [item.exam, item.name, item.service, item.tetkik, item.examName, item.hizmetAdi]
+      .map(clean).find((value) => value && !generic.test(value));
+    if (direct) return direct;
+    const report = cleanMultiline(item.reportText || item.report || "");
+    const labeled = report.match(/(?:inceleme|tetkik|işlem|islem)\s*[:\-]\s*([^\n.]{3,120})/i)?.[1];
+    if (labeled && !generic.test(clean(labeled))) return clean(labeled);
+    const modality = report.split(/\n+/).map(clean).find((line) =>
+      line.length >= 3 && line.length <= 120 && /\b(BT|CT|MR|MRG|US|USG|ULTRASON|DOPPLER|GRAFİ|GRAFI|RÖNTGEN|RONTGEN|PET|MAMOGRAFİ|MAMOGRAFI|ERCP)\b/i.test(line)
+    );
+    return modality || "";
+  }
+
+  function aoePostopRegime(p, surgery, diet) {
+    const badge = clean(surgery.badge || "");
+    const regime = [diet.code, diet.extra].filter((x) => x && x !== "-").join(" / ");
+    return [badge, regime].filter(Boolean).join("-") || "—";
+  }
+
+  function aoeLatestNursingRows(p) {
+    return (p.nursing || []).filter((x) => clean(x?.text)).slice().sort((a, b) => {
+      const aTime = parseTrDate(a.date) || 0;
+      const bTime = parseTrDate(b.date) || 0;
+      return bTime - aTime;
+    }).slice(0, 2).map((item) => ({ ...item, text:cleanMultiline(item.text || "") }));
+  }
+
+  function aoeLatestClinical(p) {
+    const rows = Array.isArray(p.clinicalHistory) && p.clinicalHistory.length
+      ? p.clinicalHistory
+      : (p.clinical ? [{ date:p.clinicalDate || "", text:p.clinical }] : []);
+    return rows.filter((x) => clean(x?.text || x?.klinikIzlem || x?.aciklama)).slice().sort((a, b) =>
+      (parseTrDate(b.date || b.tarih) || 0) - (parseTrDate(a.date || a.tarih) || 0)
+    )[0] || null;
+  }
+
+  function aoeOrderEventText(row = {}) {
+    return clean([
+      orderRawName(row), row.aciklama, row.hizmetMakro?.adi, row.hizmet?.adi,
+      row.stok?.adi, row.malzeme?.adi, row.takipDirektif?.adi
+    ].filter(Boolean).join(" "));
+  }
+
+  function aoeOrderEventDate(row = {}) {
+    return row.baslangicTarihi || row.istemTarihi || row.tarih || row.kayitTarihi || row.eklemeTarihi || "";
+  }
+
+  function aoeBloodPreparationLabel(text, amount = "") {
+    const source = clean(text);
+    const hay = searchNorm(source);
+    if (!/kan\s*hazir|eritrosit|suspansiyon|süspansiyon|taze\s*donmus|tdp|trombosit|aferez/.test(hay)) return "";
+    const parts = [];
+    const component = (label, pattern) => {
+      const before = source.match(new RegExp("(\\d+)\\s*(?:adet|ünite|unite|unit|ü|u)?\\s*(?:" + pattern + ")", "i"))?.[1];
+      const after = source.match(new RegExp("(?:" + pattern + ")\\s*[:x-]?\\s*(\\d+)", "i"))?.[1];
+      const count = before || after || (/^\d+(?:[.,]\d+)?$/.test(clean(amount)) ? clean(amount).replace(/\.0+$/, "") : "");
+      const present = new RegExp("(?:" + pattern + ")", "i").test(source);
+      if (present && !parts.some((x) => x.endsWith(" " + label) || x === label)) parts.push([count, label].filter(Boolean).join(" "));
+    };
+    component("ES", "ES|eritrosit(?:\\s+süspansiyonu|\\s+suspansiyonu)?");
+    component("TDP", "TDP|taze\\s+donmuş\\s+plazma|taze\\s+donmus\\s+plazma");
+    component("TS", "TS|trombosit(?:\\s+süspansiyonu|\\s+suspansiyonu)?|aferez\\s+trombosit");
+    return parts.length ? parts.join(", ") : "Kan hazırlığı";
+  }
+
+  function aoeFollowEvents(p) {
+    const events = [];
+    const add = (group, label, date) => {
+      const value = clean(label), when = clean(date);
+      if (!value) return;
+      const key = [group, norm(value), shortDate(when)].join("|");
+      if (!events.some((x) => x.key === key)) events.push({ key, group, label:value, date:when });
+    };
+    (p.radiology || []).forEach((item) => {
+      const name = aoeImagingName(item);
+      if (name) add(1, name, item.date || item.reportDate);
+    });
+    (p.cultures || []).forEach((item) => add(2, item.name || "Kültür", item.date));
+    const sources = [
+      ...(p.orderRows || []).map((row) => ({ text:aoeOrderEventText(row), date:aoeOrderEventDate(row), amount:row.miktar || row.adet || "" })),
+      ...((p.clinicalHistory || []).map((row) => ({ text:clean(row.text || row.klinikIzlem || row.aciklama), date:row.date || row.tarih, amount:"" })))
+    ];
+    sources.forEach((item) => {
+      if (/biyopsi|tru[ -]?cut|insizyonel\s+biyopsi|eksizyonel\s+biyopsi/i.test(item.text)) add(3, "Biyopsi", item.date);
+      const blood = aoeBloodPreparationLabel(item.text, item.amount);
+      if (blood) add(4, blood, item.date);
+    });
+    return events.sort((a, b) => a.group - b.group || (parseTrDate(b.date) || 0) - (parseTrDate(a.date) || 0));
+  }
+
+  function aoeFollowEventLine(event) {
+    return (shortDate(event.date) || aoeDate(event.date) || "—") + ": " + event.label;
+  }
+
+  function aoePatientKeys(p) {
+    const name = norm(p.adSoyad || "").replace(/[^a-z0-9çğıöşü]+/g, "");
+    return [
+      p.hastaId ? "hasta:" + clean(p.hastaId) : "",
+      p.protokol ? "protokol:" + clean(p.protokol) : "",
+      name ? "ad:" + name : ""
+    ].filter(Boolean);
+  }
+
+  function aoeLooseIdentity(value) {
+    return norm(value)
+      .replace(/[ç]/g, "c").replace(/[ğ]/g, "g").replace(/[ıi]/g, "i")
+      .replace(/[ö]/g, "o").replace(/[ş]/g, "s").replace(/[ü]/g, "u")
+      .replace(/[^a-z0-9]+/g, "");
+  }
+
+  function aoeRoomIdentity(value) {
+    return clean(value).replace(/\D+/g, "").replace(/^0+/, "");
+  }
+
+  function aoePreviousMatchesPatient(previous, patient) {
+    const currentKeys = aoePatientKeys(patient);
+    if ((previous.keys || []).some((key) => currentKeys.includes(key))) return true;
+    const previousName = aoeLooseIdentity(previous.name || "");
+    const currentName = aoeLooseIdentity(patient.adSoyad || "");
+    if (previousName && currentName && previousName === currentName) return true;
+    const previousRoom = aoeRoomIdentity(previous.room || "");
+    const currentRoom = aoeRoomIdentity(patient.oda || "");
+    return !!(previousRoom && currentRoom && previousRoom === currentRoom && previousName && currentName &&
+      (previousName.includes(currentName) || currentName.includes(previousName)));
+  }
+
+  function aoeLiveFixed(p) {
+    const meta = extractCardMeta(p);
+    const consultFacts = aoeConsultFacts(p);
+    const surgery = aoeSurgeryInfo(p);
+    const postopOperation = /^POSTOP/i.test(clean(surgery.badge || ""))
+      ? clean(meta.go || p.plannedOperation || consultFacts.go || "")
+      : "";
+    return {
+      name: clean(p.adSoyad || ""),
+      diagnosis: clean(consultFacts.diagnosis || p.tani || ""),
+      operation: clean(surgery.operation || postopOperation || ""),
+      plan: clean(p.plan || ""),
+      admission: aoeDate(p.yatis || ""),
+      surgeryDate: clean(surgery.date || ""),
+      bh: clean(meta.bh || p.knownDiseases || consultFacts.bh || ""),
+      ki: clean(meta.ki || p.homeMeds || consultFacts.ki || ""),
+      go: clean(meta.go || p.plannedOperation || consultFacts.go || "")
+    };
+  }
+
+  function aoeFixedFor(p) {
+    const map = state.aoePreviousFixed || {};
+    for (const key of aoePatientKeys(p)) {
+      if (map[key]) {
+        const live = aoeLiveFixed(p);
+        const saved = map[key];
+        const locked = {};
+        ["name", "diagnosis", "operation", "plan", "admission", "surgeryDate", "bh", "ki", "go"].forEach((field) => {
+          if (Object.prototype.hasOwnProperty.call(saved, field)) locked[field] = clean(saved[field] || "");
+        });
+        const merged = { ...live, ...locked };
+        if (/\bCA\b/i.test(merged.bh || "") && !aoeHasCancerEvidence(patientFreeText(p))) {
+          merged.bh = clean(String(merged.bh).replace(/\bCA\b/gi, "").replace(/\s*[,;+\/]\s*$/g, "").replace(/^\s*[,;+\/]\s*/g, "").replace(/\s*[,;+\/]\s*[,;+\/]\s*/g, ", "));
+        }
+        return merged;
+      }
+    }
+    return aoeLiveFixed(p);
+  }
+
+  function aoeFixedManifest() {
+    const current = (state.patients || []).map((p) => ({ keys: aoePatientKeys(p), ...aoeFixedFor(p) }));
+    const currentKeys = new Set(current.flatMap((p) => p.keys || []));
+    const preserved = (state.aoePreviousPatients || []).filter((p) =>
+      !(p.keys || []).some((key) => currentKeys.has(key))
+    );
+    return {
+      version: 2,
+      generatedAt: new Date().toISOString(),
+      patients: [...current, ...preserved]
+    };
+  }
+
+  function aoeAgeSex(p) {
+    const age = clean(p.yas || "");
+    const raw = norm(p.cinsiyet || "");
+    const sex = /^(e|erkek|male|m)$/.test(raw) ? "E" : (/^(k|kadın|kadin|female|f)$/.test(raw) ? "K" : "");
+    return age + sex;
+  }
+
+  function aoeClinicName(p) {
+    return clean(p.birim || p.servis || p.klinik || "DİĞER KLİNİKLER");
+  }
+
+  function aoeClinicKey(p) {
+    return norm(aoeClinicName(p)).replace(/\s+/g, " ");
+  }
+
+  function aoeClinicPriority(name) {
+    const value = norm(name);
+    if (/genel\s*cerrahi/.test(value)) {
+      const no = Number(value.match(/(?:kliniği|klinigi|servisi|servis)?\s*([1-4])\b/)?.[1] || value.match(/\b([1-4])\b/)?.[1] || 0);
+      return ({ 2:0, 1:1, 3:2, 4:3 })[no] ?? 4;
+    }
+    return 100;
+  }
+
+  function aoeDefaultClinicOrder() {
+    const names = [...new Map((state.patients || []).map((p) => [aoeClinicKey(p), aoeClinicName(p)])).values()];
+    return names.sort((a, b) => {
+      const rank = aoeClinicPriority(a) - aoeClinicPriority(b);
+      return rank || a.localeCompare(b, "tr", { sensitivity:"base", numeric:true });
+    });
+  }
+
+  function aoeSavedClinicOrder() {
+    if (Array.isArray(state.aoeClinicOrder)) return state.aoeClinicOrder;
+    try {
+      const saved = JSON.parse(localStorage.getItem("vizitSadeClinicOrder") || "[]");
+      state.aoeClinicOrder = Array.isArray(saved) ? saved.map(clean).filter(Boolean) : [];
+    } catch (e) { state.aoeClinicOrder = []; }
+    return state.aoeClinicOrder;
+  }
+
+  function aoeEffectiveClinicOrder() {
+    const defaults = aoeDefaultClinicOrder();
+    const byKey = new Map(defaults.map((name) => [norm(name), name]));
+    const ordered = [];
+    aoeSavedClinicOrder().forEach((name) => {
+      const actual = byKey.get(norm(name));
+      if (actual && !ordered.some((x) => norm(x) === norm(actual))) ordered.push(actual);
+    });
+    defaults.forEach((name) => {
+      if (!ordered.some((x) => norm(x) === norm(name))) ordered.push(name);
+    });
+    return ordered;
+  }
+
+  function aoeConfigureClinicOrder() {
+    const current = aoeEffectiveClinicOrder();
+    if (!current.length) return alert("Önce hasta listesini tarayın.");
+    const answer = prompt(
+      "Klinikleri istediğiniz sırada, her satıra bir klinik gelecek şekilde düzenleyin:",
+      current.join("\n")
+    );
+    if (answer == null) return;
+    const requested = answer.split(/\n|,/).map(clean).filter(Boolean);
+    const available = new Map(current.map((name) => [norm(name), name]));
+    const valid = requested.map((name) => available.get(norm(name))).filter(Boolean);
+    current.forEach((name) => { if (!valid.some((x) => norm(x) === norm(name))) valid.push(name); });
+    state.aoeClinicOrder = [...new Map(valid.map((name) => [norm(name), name])).values()];
+    try { localStorage.setItem("vizitSadeClinicOrder", JSON.stringify(state.aoeClinicOrder)); } catch (e) {}
+    const summary = uiEl("aoe-order-summary");
+    if (summary) summary.textContent = "Çıktı sırası: " + state.aoeClinicOrder.join(" → ");
+  }
+
+  function aoeSortedPatients() {
+    const order = new Map(aoeEffectiveClinicOrder().map((name, index) => [norm(name), index]));
+    return (state.patients || []).slice().sort((a, b) => {
+      const clinicA = aoeClinicName(a), clinicB = aoeClinicName(b);
+      const rank = (order.get(norm(clinicA)) ?? 999) - (order.get(norm(clinicB)) ?? 999);
+      if (rank) return rank;
+      const clinicOrder = clinicA.localeCompare(clinicB, "tr", { sensitivity:"base", numeric:true });
+      if (clinicOrder) return clinicOrder;
+      const roomOrder = clean(a.oda || "").localeCompare(clean(b.oda || ""), "tr", { sensitivity:"base", numeric:true });
+      if (roomOrder) return roomOrder;
+      return clean(a.adSoyad || "").localeCompare(clean(b.adSoyad || ""), "tr", { sensitivity:"base" });
+    });
+  }
+
+  function aoeClinicHeadingHtml(name) {
+    return '<div class="clinic-heading">' + aoeEsc(clean(name).toLocaleUpperCase("tr-TR")) + '</div>';
+  }
+
+  function aoePatientHtml(p) {
+    const meta = extractCardMeta(p);
+    const consultFacts = aoeConsultFacts(p);
+    const surgery = aoeSurgeryInfo(p);
+    const diet = compactDietInfo(p.diyet || "");
+    const fixed = aoeFixedFor(p);
+    const title = [doctorInitials(p.doktor), p.oda, fixed.name || p.adSoyad, aoeAgeSex(p)].filter(Boolean).join("-");
+    const orders = aoeOrderLines(p.orders || []);
+    const clinicalRow = aoeLatestClinical(p);
+    const followEvents = aoeFollowEvents(p);
+    const clinical = followEvents.map((event) =>
+      "<div><b>" + aoeEsc(shortDate(event.date) || aoeDate(event.date) || "—") + ":</b> " + aoeEsc(event.label) + "</div>"
+    ).join("") + (clinicalRow
+      ? "<div><b>(" + aoeEsc(aoeDate(clinicalRow.date || clinicalRow.tarih) || "—") + ")</b> " +
+        aoeEsc(clinicalRow.text || clinicalRow.klinikIzlem || clinicalRow.aciklama || "") + "</div>"
+      : "");
+    const nursingRows = aoeLatestNursingRows(p);
+    const nursing = nursingRows.map((x) =>
+      "<div class=\"nursing-item\"><b>(" + aoeEsc(aoeDate(x.date) || "—") + ")</b> " + aoeEsc(x.text) + "</div>"
+    ).join("") || "—";
+    const imaging = (p.radiology || []).filter((x) => aoeImagingName(x)).map((x) => {
+      const report = cleanMultiline(x.reportText || x.report || "");
+      return "<div class=\"imaging-item" + (report ? " has-report" : "") + "\"><b>" +
+        aoeEsc(aoeDate(x.date || x.reportDate) || "—") + ": " + aoeEsc(aoeImagingName(x)) + "</b>" +
+        (report ? "<br>" + aoeEsc(report) : "") + "</div>";
+    }
+    ).join("") || "—";
+    const consults = (p.consults || []).filter((x) => clean(x.answer)).map((x) =>
+      "<div class=\"consult-item\"><b>(" + aoeEsc(aoeDate(x.date) || "—") + ") " + aoeEsc(x.unit || "Konsültasyon") +
+      "</b><br>" + aoeEsc(x.answer) + "</div>"
+    ).join("") || "—";
+    const labTable = typeof visitLabTableHtml === "function"
+      ? visitLabTableHtml(p.labs || {}, latestVitalLine(p.vitals || [], p)) : "";
+    return '<section class="patient">' +
+      '<div class="patient-title">' + aoeEsc(title) + '</div><div class="section-gap">&nbsp;</div>' +
+      '<div><b>TANI:</b> ' + aoeEsc(fixed.diagnosis || "") + '</div>' +
+      '<div><b>OP:</b> ' + aoeEsc(fixed.operation || "—") + '</div>' +
+      '<div><b>PLAN:</b> ' + aoeEsc(fixed.plan || "—") + '</div>' +
+      '<div><b>POSTOP-REJİM:</b> ' + aoeEsc(aoePostopRegime(p, surgery, diet)) + '</div>' +
+      '<div><b>Yatış Tarihi:</b> ' + aoeEsc(fixed.admission || "—") + '</div>' +
+      '<div><b>Op Tarihi:</b> ' + aoeEsc(fixed.surgeryDate || "—") + '</div>' +
+      '<div><b>BH:</b> ' + aoeEsc(fixed.bh || "—") + '</div>' +
+      '<div><b>Kİ:</b> ' + aoeEsc(fixed.ki || "—") + '</div>' +
+      '<div><b>GO:</b> ' + aoeEsc(fixed.go || "—") + '</div>' +
+      '<div class="rule"></div>' +
+      (labTable ? '<div><b>Laboratuvar:</b></div><div class="labs">' + labTable + '</div><div class="section-gap">&nbsp;</div>' : "") +
+      '<div><b>Order:</b></div>' + orders + '<div class="section-gap">&nbsp;</div>' +
+      '<div><b>Gözlem:</b>' + nursing + '</div><div class="section-gap">&nbsp;</div>' +
+      '<div><b>Takip:</b>' + (clinical || "—") + '</div><div class="section-gap">&nbsp;</div>' +
+      '<div><b>Konsültasyonlar:</b>' + consults + '</div><div class="section-gap">&nbsp;</div>' +
+      '<div class="imaging"><b>Görüntüleme:</b>' + imaging + '</div><div class="section-gap">&nbsp;</div>' +
+      '</section><div class="patient-gap">&nbsp;<br>&nbsp;</div>';
+  }
+
+  function aoeSplitColumns(patients) {
+    const sorted = patients.slice();
+    const prepared = sorted.map((p) => {
+      const html = aoePatientHtml(p);
+      return { p, html, weight:html.replace(/<[^>]+>/g, "").length };
+    });
+    const target = prepared.reduce((sum, x) => sum + x.weight, 0) / 2;
+    const left = [], right = []; let side = 0, leftWeight = 0, lastClinic = "";
+    prepared.forEach((item, index) => {
+      const clinic = aoeClinicKey(item.p);
+      const changedClinic = clinic !== lastClinic;
+      if (side === 0 && left.length && leftWeight >= target) {
+        side = 1;
+        lastClinic = "";
+      }
+      const bucket = side === 0 ? left : right;
+      if (clinic !== lastClinic) bucket.push(aoeClinicHeadingHtml(aoeClinicName(item.p)));
+      bucket.push(item.html);
+      if (side === 0) leftWeight += item.weight + (changedClinic ? 80 : 0);
+      lastClinic = clinic;
+    });
+    return [left.join(""), right.join("")];
+  }
+
+  function aoeDocumentHtml() {
+    const columns = aoeSplitColumns(aoeSortedPatients());
+    return '<!doctype html><html><head><meta charset="utf-8"><title>Vizit Sade</title><style>' +
+      '@page{size:A4;margin:18mm 14mm 17mm 14mm}' +
+      'body{margin:0;color:#000;font-family:Tahoma,Arial,sans-serif;font-size:9pt;line-height:1.03}' +
+      '.title{font-size:17pt;font-weight:bold;margin:0 0 6pt}' +
+      'table.columns{border-collapse:collapse;width:100%;table-layout:fixed}' +
+      'table.columns>tbody>tr>td{width:50%;vertical-align:top;padding:0 9pt}' +
+      'table.columns>tbody>tr>td:first-child{border-right:1px solid #aaa;padding-left:0}' +
+      'table.columns>tbody>tr>td:last-child{padding-right:0}' +
+      '.patient,.patient *{font-family:Tahoma,Arial,sans-serif;font-size:9pt}' +
+      '.patient{margin:0;padding:0;line-height:1.03}' +
+      '.patient-title{font-size:15pt;line-height:1.0;font-weight:bold;margin:0 0 1pt}' +
+      '.clinic-heading{text-align:center;font-size:12pt;font-weight:bold;margin:0 0 8pt;border-bottom:1px solid #555;padding-bottom:2pt}' +
+      '.consult-item+.consult-item,.nursing-item+.nursing-item{margin-top:9pt!important}' +
+      '.imaging-item.has-report:not(:last-child){margin-bottom:10pt!important}' +
+      '.patient div{margin:0;padding:0}.rule{border-top:1px dashed #333;margin:3pt 0!important}' +
+      '.labs{font-size:9pt}.imaging,.imaging *{font-size:10pt}.patient b{font-weight:bold}' +
+      '.section-gap{font-size:9pt;line-height:9pt;height:9pt}' +
+      '.patient-gap{font-family:Tahoma,Arial,sans-serif;font-size:9pt;line-height:9pt;height:18pt}' +
+      '</style></head><body><div class="title">VİZİT SADE</div>' +
+      '<table class="columns"><tbody><tr><td>' + columns[0] + '</td><td>' + columns[1] +
+      '</td></tr></tbody></table></body></html>';
+  }
+
+  function aoeReadiness() {
+    const total = Number(state.metrics?.total || state.patients?.length || 0);
+    const processed = Number(state.metrics?.processed || 0);
+    const failures = (state.patients || []).reduce((sum, p) => sum + (p.lastFailedLabels || []).length, 0);
+    const loading = (state.patients || []).filter((p) => p.loading).length;
+    const ready = Boolean(state.bootstrapComplete && !state.busy && total > 0 && processed >= total && !loading && !failures);
+    return { total, processed, failures, loading, ready };
+  }
+
+  function aoeXml(value) {
+    return String(value == null ? "" : value).replace(/[&<>"']/g, (ch) => ({
+      "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&apos;"
+    })[ch]);
+  }
+
+  function aoeWordParagraph(text, options = {}) {
+    const size = Math.round(Number(options.size || 9) * 2);
+    const bold = options.bold ? "<w:b/>" : "";
+    const before = Number(options.before || 0);
+    const after = Number(options.after || 0);
+    const keep = options.keep ? "<w:keepNext/>" : "";
+    const align = options.align ? '<w:jc w:val="' + options.align + '"/>' : "";
+    const lines = String(text == null ? "" : text).split(/\n/);
+    const runs = lines.map((line, index) =>
+      (index ? "<w:r><w:br/></w:r>" : "") +
+      '<w:r><w:rPr><w:rFonts w:ascii="Tahoma" w:hAnsi="Tahoma" w:cs="Tahoma"/>' +
+      bold + '<w:sz w:val="' + size + '"/><w:szCs w:val="' + size + '"/></w:rPr>' +
+      '<w:t xml:space="preserve">' + aoeXml(line) + '</w:t></w:r>'
+    ).join("");
+    return '<w:p><w:pPr>' + keep + align + '<w:spacing w:before="' + before + '" w:after="' + after +
+      '" w:line="180" w:lineRule="auto"/></w:pPr>' + runs + '</w:p>';
+  }
+
+  function aoeWordRichParagraph(parts = [], options = {}) {
+    const size = Math.round(Number(options.size || 9) * 2);
+    const keep = options.keep ? "<w:keepNext/>" : "";
+    const align = options.align ? '<w:jc w:val="' + options.align + '"/>' : "";
+    const before = Number(options.before || 0), after = Number(options.after || 0);
+    const runs = parts.map((part) => {
+      const bold = part.bold ? "<w:b/>" : "";
+      const segments = String(part.text == null ? "" : part.text).split(/\n/);
+      return segments.map((line, index) =>
+        (part.breakBefore || index ? '<w:r><w:br/></w:r>' : "") +
+        '<w:r><w:rPr><w:rFonts w:ascii="Tahoma" w:hAnsi="Tahoma" w:cs="Tahoma"/>' + bold +
+        '<w:sz w:val="' + size + '"/><w:szCs w:val="' + size + '"/></w:rPr>' +
+        '<w:t xml:space="preserve">' + aoeXml(line) + '</w:t></w:r>'
+      ).join("");
+    }).join("");
+    return '<w:p><w:pPr>' + keep + align + '<w:spacing w:before="' + before + '" w:after="' + after +
+      '" w:line="180" w:lineRule="auto"/></w:pPr>' + runs + '</w:p>';
+  }
+
+  function aoeWordTableCell(text, options = {}) {
+    const width = Number(options.width || 420);
+    const span = Math.max(1, Number(options.span || 1));
+    const size = Math.round(Number(options.size || 7.8) * 2);
+    const bold = options.bold ? "<w:b/>" : "";
+    const align = options.align || "center";
+    const shade = options.shade ? '<w:shd w:val="clear" w:color="auto" w:fill="' + options.shade + '"/>' : "";
+    return '<w:tc><w:tcPr><w:tcW w:w="' + width + '" w:type="dxa"/>' +
+      (span > 1 ? '<w:gridSpan w:val="' + span + '"/>' : "") + shade +
+      '<w:tcMar><w:top w:w="14" w:type="dxa"/><w:left w:w="29" w:type="dxa"/>' +
+      '<w:bottom w:w="14" w:type="dxa"/><w:right w:w="29" w:type="dxa"/></w:tcMar></w:tcPr>' +
+      '<w:p><w:pPr><w:jc w:val="' + align + '"/><w:spacing w:before="0" w:after="0" w:line="180" w:lineRule="auto"/></w:pPr>' +
+      '<w:r><w:rPr><w:rFonts w:ascii="Arial Narrow" w:hAnsi="Arial Narrow" w:cs="Arial Narrow"/>' +
+      bold + '<w:sz w:val="' + size + '"/><w:szCs w:val="' + size + '"/></w:rPr>' +
+      '<w:t xml:space="preserve">' + aoeXml(text || "") + '</w:t></w:r></w:p></w:tc>';
+  }
+
+  function aoeWordLabTable(labs = {}, vitalLine = "") {
+    const dates = labVisitDates(labs, 8);
+    const border = '<w:tblBorders><w:top w:val="single" w:sz="2" w:color="D9DEE6"/>' +
+      '<w:left w:val="single" w:sz="2" w:color="D9DEE6"/><w:bottom w:val="single" w:sz="2" w:color="D9DEE6"/>' +
+      '<w:right w:val="single" w:sz="2" w:color="D9DEE6"/><w:insideH w:val="single" w:sz="2" w:color="E5E7EB"/>' +
+      '<w:insideV w:val="single" w:sz="2" w:color="E5E7EB"/></w:tblBorders>';
+    if (!dates.length) {
+      if (!vitalLine) return aoeWordParagraph("—", { size:9 });
+      return '<w:tbl><w:tblPr><w:tblW w:w="0" w:type="auto"/>' + border + '</w:tblPr>' +
+        '<w:tblGrid><w:gridCol w:w="780"/><w:gridCol w:w="3720"/></w:tblGrid>' +
+        '<w:tr>' + aoeWordTableCell("Tetkik", { width:780, bold:true, shade:"EEF2F7", align:"left" }) +
+        aoeWordTableCell("Son", { width:3720, bold:true, shade:"EEF2F7" }) + '</w:tr>' +
+        '<w:tr>' + aoeWordTableCell("Vital", { width:780, bold:true, align:"left" }) +
+        aoeWordTableCell(vitalLine, { width:3720, align:"left" }) + '</w:tr></w:tbl>';
+    }
+    const firstWidth = 732;
+    const dataWidth = Math.max(420, Math.floor(3768 / dates.length));
+    const grid = '<w:tblGrid><w:gridCol w:w="' + firstWidth + '"/>' +
+      dates.map(() => '<w:gridCol w:w="' + dataWidth + '"/>').join("") + '</w:tblGrid>';
+    const header = '<w:tr>' + aoeWordTableCell("Tetkik", { width:firstWidth, bold:true, shade:"EEF2F7", align:"left" }) +
+      dates.map((d) => aoeWordTableCell(d.label, { width:dataWidth, bold:true, shade:"EEF2F7" })).join("") + '</w:tr>';
+    const rows = VISIT_LAB_ROWS.map((key) => {
+      const cells = dates.map((d) => {
+        const raw = labValueForDate(labs, key, d.label);
+        return aoeWordTableCell(visitLabCellText(key, raw), { width:dataWidth, bold:abnormalLabValue(key, raw) });
+      }).join("");
+      return '<w:tr>' + aoeWordTableCell(VISIT_LAB_LABELS[key] || key, { width:firstWidth, bold:true, align:"left" }) + cells + '</w:tr>';
+    }).join("");
+    const fullDataWidth = dataWidth * dates.length;
+    const electro = '<w:tr>' + aoeWordTableCell("Elekt", { width:firstWidth, bold:true, align:"left" }) +
+      aoeWordTableCell(latestElectrolyteText(labs), { width:fullDataWidth, span:dates.length, align:"left" }) + '</w:tr>';
+    const vital = vitalLine ? '<w:tr>' + aoeWordTableCell("Vital", { width:firstWidth, bold:true, align:"left" }) +
+      aoeWordTableCell(vitalLine, { width:fullDataWidth, span:dates.length, align:"left" }) + '</w:tr>' : "";
+    return '<w:tbl><w:tblPr><w:tblW w:w="0" w:type="auto"/><w:tblLayout w:type="fixed"/>' + border +
+      '</w:tblPr>' + grid + header + rows + electro + vital + '</w:tbl>';
+  }
+
+  function aoeWordPatient(p) {
+    const meta = extractCardMeta(p);
+    const consultFacts = aoeConsultFacts(p);
+    const surgery = aoeSurgeryInfo(p);
+    const diet = compactDietInfo(p.diyet || "");
+    const fixed = aoeFixedFor(p);
+    const title = [doctorInitials(p.doktor), p.oda, fixed.name || p.adSoyad, aoeAgeSex(p)].filter(Boolean).join("-");
+    const paragraphs = [
+      aoeWordParagraph(title, { size:15, bold:true, keep:true }),
+      aoeWordParagraph("", { size:9 }),
+      aoeWordParagraph("TANI: " + (fixed.diagnosis || ""), { size:9, bold:true }),
+      aoeWordParagraph("OP: " + (fixed.operation || "—"), { size:9, bold:true }),
+      aoeWordParagraph("PLAN: " + (fixed.plan || "—"), { size:9, bold:true }),
+      aoeWordParagraph("POSTOP-REJİM: " + aoePostopRegime(p, surgery, diet), { size:9, bold:true }),
+      aoeWordParagraph("Yatış Tarihi: " + (fixed.admission || "—"), { size:9, bold:true }),
+      aoeWordParagraph("Op Tarihi: " + (fixed.surgeryDate || "—"), { size:9, bold:true }),
+      aoeWordParagraph("BH: " + (fixed.bh || "—"), { size:9 }),
+      aoeWordParagraph("Kİ: " + (fixed.ki || "—"), { size:9 }),
+      aoeWordParagraph("GO: " + (fixed.go || "—"), { size:9 }),
+      aoeWordParagraph("-----------------------------------------------------", { size:9 })
+    ];
+    paragraphs.push(aoeWordParagraph("Laboratuvar:", { size:9, bold:true, keep:true }));
+    paragraphs.push(aoeWordLabTable(p.labs || {}, latestVitalLine(p.vitals || [], p)), aoeWordParagraph("", { size:9 }));
+    paragraphs.push(aoeWordParagraph("Order:", { size:9, bold:true, keep:true }));
+    const orders = aoeOrderData(p.orders || []);
+    if (orders.length) orders.forEach((x, index) => paragraphs.push(
+      aoeWordParagraph((index + 1) + ". " + x.name + " — Doz: " + x.dose + " — Başlangıç: " + x.start, { size:9 })
+    ));
+    else paragraphs.push(aoeWordParagraph("—", { size:9 }));
+    paragraphs.push(aoeWordParagraph("", { size:9 }));
+    const nursingRows = aoeLatestNursingRows(p);
+    paragraphs.push(aoeWordParagraph("Gözlem:", { size:9, bold:true, keep:true }));
+    if (nursingRows.length) nursingRows.forEach((x, index) => {
+      paragraphs.push(aoeWordParagraph("(" + (aoeDate(x.date) || "—") + ") " + x.text, { size:9 }));
+      if (index < nursingRows.length - 1) paragraphs.push(aoeWordParagraph("", { size:9 }));
+    });
+    else paragraphs.push(aoeWordParagraph("—", { size:9 }));
+    paragraphs.push(aoeWordParagraph("", { size:9 }));
+    paragraphs.push(aoeWordParagraph("Takip:", { size:9, bold:true, keep:true }));
+    const followEvents = aoeFollowEvents(p);
+    followEvents.forEach((event) => paragraphs.push(aoeWordRichParagraph([
+      { text:(shortDate(event.date) || aoeDate(event.date) || "—") + ": ", bold:true },
+      { text:event.label }
+    ], { size:9 })));
+    const clinicalRow = aoeLatestClinical(p);
+    if (clinicalRow) paragraphs.push(aoeWordParagraph(
+      "(" + (aoeDate(clinicalRow.date || clinicalRow.tarih) || "—") + ") " +
+      (clinicalRow.text || clinicalRow.klinikIzlem || clinicalRow.aciklama || ""), { size:9 }
+    )); else if (!followEvents.length) paragraphs.push(aoeWordParagraph("—", { size:9 }));
+    paragraphs.push(aoeWordParagraph("", { size:9 }));
+    paragraphs.push(aoeWordParagraph("Konsültasyonlar:", { size:9, bold:true, keep:true }));
+    const answeredConsults = (p.consults || []).filter((x) => clean(x.answer));
+    answeredConsults.forEach((x, index) => {
+      paragraphs.push(aoeWordRichParagraph([
+        { text:"(" + (aoeDate(x.date) || "—") + ") ", bold:true },
+        { text:x.unit || "Konsültasyon", bold:true },
+        { text:x.answer, breakBefore:true }
+      ], { size:9 }));
+      if (index < answeredConsults.length - 1) paragraphs.push(aoeWordParagraph("", { size:9 }));
+    });
+    if (!answeredConsults.length) paragraphs.push(aoeWordParagraph("—", { size:9 }));
+    paragraphs.push(aoeWordParagraph("", { size:9 }));
+    paragraphs.push(aoeWordParagraph("Görüntüleme:", { size:10, bold:true, keep:true }));
+    const namedImaging = (p.radiology || []).filter((x) => aoeImagingName(x));
+    namedImaging.forEach((x, index) => {
+      const report = cleanMultiline(x.reportText || x.report || "");
+      paragraphs.push(aoeWordRichParagraph([
+        { text:(aoeDate(x.date || x.reportDate) || "—") + ": ", bold:true },
+        { text:aoeImagingName(x), bold:true },
+        ...(report ? [{ text:report, breakBefore:true }] : [])
+      ], { size:10 }));
+      if (report && index < namedImaging.length - 1) paragraphs.push(aoeWordParagraph("", { size:10 }));
+    });
+    if (!namedImaging.length) paragraphs.push(aoeWordParagraph("—", { size:10 }));
+    paragraphs.push(aoeWordParagraph("", { size:9 }), aoeWordParagraph("", { size:9 }), aoeWordParagraph("", { size:9 }));
+    return paragraphs.join("");
+  }
+
+  function aoeCrc32(bytes) {
+    let crc = -1;
+    for (const byte of bytes) {
+      crc ^= byte;
+      for (let j = 0; j < 8; j += 1) crc = (crc >>> 1) ^ ((crc & 1) ? 0xedb88320 : 0);
+    }
+    return (crc ^ -1) >>> 0;
+  }
+
+  function aoeU16(value) { return new Uint8Array([value & 255, (value >>> 8) & 255]); }
+  function aoeU32(value) { return new Uint8Array([value & 255, (value >>> 8) & 255, (value >>> 16) & 255, (value >>> 24) & 255]); }
+  function aoeJoin(parts) {
+    const length = parts.reduce((sum, part) => sum + part.length, 0);
+    const out = new Uint8Array(length); let offset = 0;
+    parts.forEach((part) => { out.set(part, offset); offset += part.length; });
+    return out;
+  }
+
+  function aoeZip(files) {
+    const encoder = new TextEncoder(); const locals = []; const centrals = []; let offset = 0;
+    Object.entries(files).forEach(([name, content]) => {
+      const nameBytes = encoder.encode(name); const data = encoder.encode(content); const crc = aoeCrc32(data);
+      const local = aoeJoin([aoeU32(0x04034b50),aoeU16(20),aoeU16(0),aoeU16(0),aoeU16(0),aoeU16(0),aoeU32(crc),aoeU32(data.length),aoeU32(data.length),aoeU16(nameBytes.length),aoeU16(0),nameBytes,data]);
+      locals.push(local);
+      centrals.push(aoeJoin([aoeU32(0x02014b50),aoeU16(20),aoeU16(20),aoeU16(0),aoeU16(0),aoeU16(0),aoeU16(0),aoeU32(crc),aoeU32(data.length),aoeU32(data.length),aoeU16(nameBytes.length),aoeU16(0),aoeU16(0),aoeU16(0),aoeU16(0),aoeU32(0),aoeU32(offset),nameBytes]));
+      offset += local.length;
+    });
+    const central = aoeJoin(centrals);
+    return aoeJoin([...locals, central, aoeU32(0x06054b50),aoeU16(0),aoeU16(0),aoeU16(centrals.length),aoeU16(centrals.length),aoeU32(central.length),aoeU32(offset),aoeU16(0)]);
+  }
+
+  function aoeWordXmlColor(xml, color = "FF0000") {
+    const colorTag = '<w:color w:val="' + String(color || "FF0000").replace(/[^0-9A-F]/gi, "") + '"/>';
+    return String(xml || "").replace(/<w:r\b([^>]*)>([\s\S]*?)<\/w:r>/g, (run, attrs, inner) => {
+      if (/<w:rPr\b/.test(inner)) {
+        inner = inner.replace(/<w:rPr\b([^>]*)>([\s\S]*?)<\/w:rPr>/, (properties, propertyAttrs, content) => {
+          const colored = /<w:color\b/i.test(content)
+            ? content.replace(/<w:color\b[^>]*\/?\s*>/gi, colorTag)
+            : colorTag + content;
+          return '<w:rPr' + propertyAttrs + '>' + colored + '</w:rPr>';
+        });
+      } else inner = '<w:rPr>' + colorTag + '</w:rPr>' + inner;
+      return '<w:r' + attrs + '>' + inner + '</w:r>';
+    });
+  }
+
+  function aoeDocxBytes() {
+    const sortedPatients = aoeSortedPatients();
+    const previousPatients = state.aoePreviousWordPatients || [];
+    const used = new Set();
+    const entries = [];
+    previousPatients.forEach((previous, previousIndex) => {
+      const matchIndex = sortedPatients.findIndex((patient, index) =>
+        !used.has(index) && aoePreviousMatchesPatient(previous, patient)
+      );
+      if (matchIndex >= 0) {
+        const patient = sortedPatients[matchIndex];
+        entries.push({ patient, clinic:aoeClinicName(patient), room:clean(patient.oda || ""), previousIndex, missing:false });
+        used.add(matchIndex);
+      } else entries.push({ previous, clinic:clean(previous.clinicName || "DİĞER KLİNİKLER"), room:clean(previous.room || ""), previousIndex, missing:true });
+    });
+    sortedPatients.forEach((patient, index) => {
+      if (used.has(index)) return;
+      entries.push({ patient, clinic:aoeClinicName(patient), room:clean(patient.oda || ""), previousIndex:previousPatients.length + index, missing:false });
+    });
+    const configuredOrder = new Map(aoeEffectiveClinicOrder().map((name, index) => [norm(name), index]));
+    entries.sort((a, b) => {
+      const priority = aoeClinicPriority(a.clinic) - aoeClinicPriority(b.clinic);
+      if (priority) return priority;
+      const configured = (configuredOrder.get(norm(a.clinic)) ?? 999) - (configuredOrder.get(norm(b.clinic)) ?? 999);
+      if (configured) return configured;
+      const clinic = clean(a.clinic).localeCompare(clean(b.clinic), "tr", { sensitivity:"base", numeric:true });
+      if (clinic) return clinic;
+      const room = clean(a.room).localeCompare(clean(b.room), "tr", { sensitivity:"base", numeric:true });
+      if (room) return room;
+      return a.previousIndex - b.previousIndex;
+    });
+    let orderedPatients = ""; let lastClinic = "";
+    entries.forEach((entry) => {
+      const key = norm(entry.clinic);
+      if (key !== lastClinic) orderedPatients += aoeWordParagraph(
+        clean(entry.clinic || "DİĞER KLİNİKLER").toLocaleUpperCase("tr-TR"),
+        { size:12, bold:true, align:"center", before:80, after:120, keep:true }
+      );
+      lastClinic = key;
+      orderedPatients += entry.missing ? aoeWordXmlColor(entry.previous.xml) : aoeWordPatient(entry.patient);
+    });
+    const body = aoeWordParagraph("VİZİT SADE", { size:17, bold:true, after:120 }) + orderedPatients;
+    const documentXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+      '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>' + body +
+      '<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1843" w:right="1121" w:bottom="1535" w:left="1005" w:header="720" w:footer="0"/><w:cols w:num="2" w:space="720" w:sep="1"/></w:sectPr></w:body></w:document>';
+    const manifestXml = '<?xml version="1.0" encoding="UTF-8"?><aoeData>' + aoeXml(JSON.stringify(aoeFixedManifest())) + '</aoeData>';
+    return aoeZip({
+      '[Content_Types].xml':'<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>',
+      '_rels/.rels':'<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>',
+      'word/document.xml':documentXml,
+      'word/vizit-sade-data.xml':manifestXml
+    });
+  }
+
+  async function aoeReadZipEntries(file) {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const decoder = new TextDecoder();
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const entries = {};
+    let eocd = -1;
+    for (let i = Math.max(0, bytes.length - 65557); i <= bytes.length - 22; i += 1) {
+      if (view.getUint32(i, true) === 0x06054b50) eocd = i;
+    }
+    if (eocd < 0) throw new Error("Geçerli bir DOCX/ZIP merkez dizini bulunamadı");
+    const entryCount = view.getUint16(eocd + 10, true);
+    let offset = view.getUint32(eocd + 16, true);
+    for (let index = 0; index < entryCount; index += 1) {
+      if (offset + 46 > bytes.length || view.getUint32(offset, true) !== 0x02014b50) {
+        throw new Error("DOCX merkez dizini okunamadı (kayıt " + (index + 1) + ")");
+      }
+      const method = view.getUint16(offset + 10, true);
+      const compressedSize = view.getUint32(offset + 20, true);
+      const nameLength = view.getUint16(offset + 28, true);
+      const extraLength = view.getUint16(offset + 30, true);
+      const commentLength = view.getUint16(offset + 32, true);
+      const localOffset = view.getUint32(offset + 42, true);
+      const name = decoder.decode(bytes.slice(offset + 46, offset + 46 + nameLength));
+      if (localOffset + 30 > bytes.length || view.getUint32(localOffset, true) !== 0x04034b50) {
+        throw new Error("DOCX iç kayıt başlığı okunamadı: " + name);
+      }
+      const localNameLength = view.getUint16(localOffset + 26, true);
+      const localExtraLength = view.getUint16(localOffset + 28, true);
+      const dataStart = localOffset + 30 + localNameLength + localExtraLength;
+      const compressed = bytes.slice(dataStart, dataStart + compressedSize);
+      let data = compressed;
+      if (method === 8) {
+        if (typeof DecompressionStream !== "function") throw new Error("Tarayıcı sıkıştırılmış Word dosyasını açmayı desteklemiyor");
+        try {
+          const stream = new Blob([compressed]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+          data = new Uint8Array(await new Response(stream).arrayBuffer());
+        } catch (error) {
+          throw new Error("DOCX içeriği açılamadı: " + name + " (" + (error?.message || error) + ")");
+        }
+      } else if (method !== 0) {
+        throw new Error("Desteklenmeyen DOCX sıkıştırma yöntemi: " + method);
+      }
+      entries[name] = decoder.decode(data);
+      offset += 46 + nameLength + extraLength + commentLength;
+    }
+    return entries;
+  }
+
+  function aoeIsPatientTitleText(text) {
+    const parts = clean(text).split("-").map(clean).filter(Boolean);
+    return parts.length >= 4 && /^\d{1,3}[EK]?$/.test(parts[parts.length - 1] || "");
+  }
+
+  function aoeCombinedPatientTitle(first, second) {
+    const joined = clean([first, second].filter(Boolean).join(" "));
+    return aoeIsPatientTitleText(joined) ? joined : "";
+  }
+
+  function aoeLegacyManifest(documentXml) {
+    const doc = new DOMParser().parseFromString(documentXml || "", "application/xml");
+    const nodesByLocalName = (node, localName) => {
+      const namespaced = Array.from(node.getElementsByTagNameNS?.("*", localName) || []);
+      return namespaced.length ? namespaced : Array.from(node.getElementsByTagName("w:" + localName));
+    };
+    const paragraphNodes = nodesByLocalName(doc, "p");
+    const rawParagraphs = paragraphNodes.flatMap((node) => {
+      let text = "";
+      const walk = (part) => {
+        Array.from(part.childNodes || []).forEach((child) => {
+          const localName = child.localName || String(child.nodeName || "").split(":").pop();
+          if (localName === "t") text += child.textContent || "";
+          else if (localName === "br" || localName === "cr") text += "\n";
+          else walk(child);
+        });
+      };
+      walk(node);
+      const sizes = nodesByLocalName(node, "sz").map((x) => x.getAttribute("w:val") || x.getAttribute("val") || "");
+      const lines = text.split(/\n+/).map(clean).filter(Boolean);
+      const grouped = [];
+      lines.forEach((line) => {
+        const previous = grouped[grouped.length - 1];
+        const previousField = previous?.text.match(/^(TANI|OP|BH|K[İI]|GO)\s*:/i)?.[1] || "";
+        const startsAnotherField = /^[^:]{1,24}:/.test(line);
+        if (previousField && !startsAnotherField && !aoeIsPatientTitleText(line)) previous.text = clean(previous.text + " " + line);
+        else grouped.push({
+          text:line,
+          isPatientTitle:aoeIsPatientTitleText(line) || (sizes.includes("30") && (line.match(/-/g) || []).length >= 2)
+        });
+      });
+      return grouped;
+    });
+    const paragraphs = [];
+    for (let index = 0; index < rawParagraphs.length; index += 1) {
+      const paragraph = rawParagraphs[index];
+      const combined = !paragraph.isPatientTitle && /^[^-]+-\d+-/.test(paragraph.text)
+        ? aoeCombinedPatientTitle(paragraph.text, rawParagraphs[index + 1]?.text)
+        : "";
+      if (combined) {
+        paragraphs.push({ text:combined, isPatientTitle:true });
+        index += 1;
+      } else paragraphs.push(paragraph);
+    }
+    const patients = [];
+    let current = null;
+    const assign = (label, value) => {
+      if (!current) return;
+      const map = {
+        "TANI":"diagnosis", "OP":"operation", "PLAN":"plan",
+        "YATIŞ TARİHİ":"admission", "YATIS TARİHİ":"admission", "YATIS TARIHI":"admission",
+        "OP TARİHİ":"surgeryDate", "OP TARIHI":"surgeryDate",
+        "BH":"bh", "Kİ":"ki", "KI":"ki", "GO":"go"
+      };
+      const field = map[label.toLocaleUpperCase("tr-TR")];
+      if (field && !Object.prototype.hasOwnProperty.call(current, field)) current[field] = clean(value || "");
+    };
+    paragraphs.forEach((paragraph) => {
+      if (paragraph.isPatientTitle && paragraph.text && paragraph.text !== "VİZİT SADE") {
+        if (current) patients.push(current);
+        const parts = paragraph.text.split("-").map(clean).filter(Boolean);
+        const lastIsAge = /^\d{1,3}[EK]?$/.test(parts[parts.length - 1] || "");
+        const nameStart = parts.length >= 4 ? 2 : 1;
+        const nameParts = parts.slice(nameStart, lastIsAge ? -1 : undefined);
+        const name = clean(nameParts.join("-"));
+        const nameKey = norm(name).replace(/[^a-z0-9çğıöşü]+/g, "");
+        current = { keys:nameKey ? ["ad:" + nameKey] : [], name };
+        return;
+      }
+      if (!current || !paragraph.text) return;
+      const match = paragraph.text.match(/^([^:]{1,24}):\s*(.*)$/);
+      if (match) assign(clean(match[1]), clean(match[2]));
+    });
+    if (current) patients.push(current);
+    return { version:0, generatedAt:"", patients:patients.filter((p) => p.name) };
+  }
+
+  function aoeWordBlockInfo(xml) {
+    try {
+      const doc = new DOMParser().parseFromString(
+        '<root xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' + xml + '</root>',
+        "application/xml"
+      );
+      const byLocal = (name) => {
+        const namespaced = Array.from(doc.getElementsByTagNameNS?.("*", name) || []);
+        return namespaced.length ? namespaced : Array.from(doc.getElementsByTagName("w:" + name));
+      };
+      let text = "";
+      const walk = (node) => Array.from(node.childNodes || []).forEach((child) => {
+        const localName = child.localName || String(child.nodeName || "").split(":").pop();
+        if (localName === "t") text += child.textContent || "";
+        else if (localName === "br" || localName === "cr") text += "\n";
+        else walk(child);
+      });
+      walk(doc.documentElement);
+      text = text.trim();
+      const sizes = byLocal("sz").map((x) => x.getAttribute("w:val") || x.getAttribute("val") || "");
+      const centered = byLocal("jc").some((x) => (x.getAttribute("w:val") || x.getAttribute("val")) === "center");
+      return { text, lines:text.split(/\n+/).map(clean).filter(Boolean), sizes, centered };
+    } catch (e) { return { text:"", lines:[], sizes:[], centered:false }; }
+  }
+
+  function aoeNameFromPatientTitle(title) {
+    const parts = clean(title).split("-").map(clean).filter(Boolean);
+    const lastIsAge = /^\d{1,3}[EK]?$/.test(parts[parts.length - 1] || "");
+    const nameStart = parts.length >= 4 ? 2 : 1;
+    return clean(parts.slice(nameStart, lastIsAge ? -1 : undefined).join("-"));
+  }
+
+  function aoeRoomFromPatientTitle(title) {
+    const parts = clean(title).split("-").map(clean).filter(Boolean);
+    return parts.length >= 4 ? clean(parts[1]) : "";
+  }
+
+  function aoePreviousWordPatients(documentXml) {
+    const body = String(documentXml || "").match(/<w:body[^>]*>([\s\S]*?)<\/w:body>/)?.[1] || "";
+    const blocks = body.match(/<w:p\b[\s\S]*?<\/w:p>|<w:tbl\b[\s\S]*?<\/w:tbl>/g) || [];
+    const result = []; let current = null; let pendingClinicXml = ""; let activeClinicName = "";
+    const finish = () => {
+      if (current?.name && current.blocks.length) result.push({
+        name:current.name,
+        keys:["ad:" + norm(current.name).replace(/[^a-z0-9çğıöşü]+/g, "")],
+        xml:current.blocks.join(""),
+        clinicXml:current.clinicXml || "",
+        clinicName:current.clinicName || ""
+      });
+      current = null;
+    };
+    const infos = blocks.map((block) => block.startsWith("<w:p") ? aoeWordBlockInfo(block) : { text:"", lines:[], sizes:[], centered:false });
+    for (let index = 0; index < blocks.length; index += 1) {
+      const block = blocks[index];
+      const info = infos[index];
+      const titleLine = (info.lines || []).find((line) => aoeIsPatientTitleText(line)) || info.text;
+      const nextTitleLine = (infos[index + 1]?.lines || []).find((line) => aoeIsPatientTitleText(line)) || infos[index + 1]?.text;
+      const joinedTitle = !aoeIsPatientTitleText(titleLine) && /^[^-]+-\d+-/.test(titleLine)
+        ? aoeCombinedPatientTitle(titleLine, nextTitleLine)
+        : "";
+      const isPatientTitle = (aoeIsPatientTitleText(titleLine) || (info.sizes.includes("30") && aoeIsPatientTitleText(titleLine))) && titleLine !== "VİZİT SADE";
+      const isClinicHeading = info.sizes.includes("24") && info.centered && info.text;
+      if (joinedTitle) {
+        finish();
+        current = { name:aoeNameFromPatientTitle(joinedTitle), room:aoeRoomFromPatientTitle(joinedTitle), blocks:[block, blocks[index + 1]], clinicXml:pendingClinicXml, clinicName:activeClinicName };
+        pendingClinicXml = "";
+        index += 1;
+      } else if (isPatientTitle) {
+        finish();
+        current = { name:aoeNameFromPatientTitle(titleLine), room:aoeRoomFromPatientTitle(titleLine), blocks:[block], clinicXml:pendingClinicXml, clinicName:activeClinicName };
+        pendingClinicXml = "";
+      } else if (isClinicHeading) {
+        finish();
+        pendingClinicXml = block;
+        activeClinicName = clean(info.text);
+      } else if (current) current.blocks.push(block);
+    }
+    finish();
+    return result.filter((p) => p.keys[0] !== "ad:");
+  }
+
+  function aoeMissingPreviousWordPatients() {
+    return (state.aoePreviousWordPatients || []).filter((previous) =>
+      !(state.patients || []).some((patient) => aoePreviousMatchesPatient(previous, patient))
+    );
+  }
+
+  function aoeSetOldFileStatus(ok, message) {
+    const status = uiEl("aoe-old-status");
+    const button = uiEl("aoe-load-old");
+    if (status) {
+      status.textContent = message;
+      status.style.background = ok ? "#dcfce7" : "#fee2e2";
+      status.style.color = ok ? "#166534" : "#991b1b";
+      status.style.fontWeight = "bold";
+    }
+    if (button) button.textContent = ok ? "YÜKLENDİ ✓ — Başka DOCX Seç" : "Dünkü DOCX Dosyasını Yükle";
+  }
+
+  async function aoeLoadPreviousFile(file) {
+    if (!file) return;
+    try {
+      const entries = await aoeReadZipEntries(file);
+      const documentXml = entries['word/document.xml'] || "";
+      const xml = entries['word/vizit-sade-data.xml'] || entries['word/acil-otoexport-data.xml'];
+      let payload;
+      if (xml) {
+        const doc = new DOMParser().parseFromString(xml, "application/xml");
+        payload = JSON.parse(doc.documentElement.textContent || "{}");
+      } else {
+        payload = aoeLegacyManifest(documentXml);
+        if (!(payload.patients || []).length) throw new Error("Eski DOCX içinden hasta sabit bilgileri okunamadı.");
+      }
+      const legacy = aoeLegacyManifest(documentXml);
+      const mergedPatients = [...(payload.patients || [])];
+      (legacy.patients || []).forEach((patient) => {
+        const existingIndex = mergedPatients.findIndex((old) =>
+          (patient.keys || []).some((key) => (old.keys || []).includes(key))
+        );
+        if (existingIndex < 0) {
+          mergedPatients.push(patient);
+          return;
+        }
+        const existing = mergedPatients[existingIndex];
+        const visibleEdits = {};
+        ["name", "diagnosis", "operation", "plan", "admission", "surgeryDate", "bh", "ki", "go"].forEach((field) => {
+          if (Object.prototype.hasOwnProperty.call(patient, field)) visibleEdits[field] = clean(patient[field] || "");
+        });
+        mergedPatients[existingIndex] = {
+          ...existing,
+          ...visibleEdits,
+          keys:[...new Set([...(existing.keys || []), ...(patient.keys || [])])]
+        };
+      });
+      payload.patients = mergedPatients;
+      const map = {};
+      (payload.patients || []).forEach((patient) => (patient.keys || []).forEach((key) => { map[key] = patient; }));
+      state.aoePreviousFixed = map;
+      state.aoePreviousPatients = payload.patients || [];
+      state.aoePreviousWordPatients = aoePreviousWordPatients(documentXml);
+      state.aoePreviousFileName = file.name;
+      state.aoePreviousPatientCount = (payload.patients || []).length;
+      state.aoePreviousMissingCount = aoeMissingPreviousWordPatients().length;
+      const loadedMessage = "YÜKLENDİ ✓ " + file.name + " • " + state.aoePreviousPatientCount +
+        " hasta • açık listede olmayan " + state.aoePreviousMissingCount + " hasta değişmeden korunacak";
+      aoeSetOldFileStatus(true, loadedMessage);
+      alert(loadedMessage);
+    } catch (e) {
+      state.aoePreviousFixed = {};
+      state.aoePreviousPatients = [];
+      state.aoePreviousWordPatients = [];
+      state.aoePreviousFileName = "";
+      state.aoePreviousPatientCount = 0;
+      state.aoePreviousMissingCount = 0;
+      aoeSetOldFileStatus(false, "YÜKLENEMEDİ — " + (e?.message || e));
+      alert("Eski dosya okunamadı: " + (e?.message || e));
+    }
+  }
+
+  async function aoeEnsureReady() {
+    let info = aoeReadiness();
+    if (info.ready) return true;
+    if (state.busy) {
+      alert("Hasta taraması devam ediyor. Panelde Hazır göstergesi yeşile dönünce tekrar deneyin.");
+      return false;
+    }
+    await refreshAllDetails(true, "autoexport");
+    info = aoeReadiness();
+    if (!info.ready) {
+      alert(info.failures
+        ? "OtoExport durduruldu: " + info.failures + " veri bölümü alınamadı. Detayları yenileyip tekrar deneyin."
+        : "OtoExport durduruldu: tarama henüz tamamlanmadı.");
+      return false;
+    }
+    return true;
+  }
+
+  function aoeSaveDocx(prefix = "Vizit-Sade") {
+    const blob = new Blob([aoeDocxBytes()], { type:"application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = prefix + "-" + new Date().toISOString().slice(0,10) + ".docx";
+    a.click();
+    window.setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    return a.download;
+  }
+
+  async function aoeDownloadWord() {
+    if (!(await aoeEnsureReady())) return;
+    aoeSaveDocx("Vizit-Sade");
+  }
+
+  async function aoeGoogleDocs() {
+    if (!(await aoeEnsureReady())) return;
+    try {
+      const fileName = aoeSaveDocx("Vizit-Sade-GoogleDocs");
+      window.open("https://drive.google.com/drive/u/0/my-drive", "_blank");
+      alert(
+        fileName + " indirildi ve Google Drive açıldı.\n\n" +
+        "Drive'da: Yeni → Dosya yükleme → indirilen DOCX'i seçin.\n" +
+        "Yüklenince dosyaya sağ tıklayıp Birlikte aç → Google Dokümanlar seçin.\n\n" +
+        "Bu yöntem punto, kalınlık, tablo ve sütun düzenini Ctrl+V yönteminden çok daha iyi korur."
+      );
+    } catch (e) {
+      alert("Google Docs için DOCX hazırlanamadı: " + (e?.message || e));
+    }
+  }
+
+  function aoeInstallExportButtons() {
+    const root = uiEl("vizit-sade-live-panel");
+    const target = uiEl("fsl-export-tools");
+    if (!root || !target || uiEl("aoe-word-all")) return;
+    const holder = uiDocument().createElement("div");
+    holder.style.cssText = "display:grid;grid-template-columns:1fr 1fr;gap:5px;padding-top:7px;border-top:1px solid #cbd5e1";
+    holder.innerHTML =
+      '<div id="aoe-ready" style="grid-column:1/-1;padding:5px;border-radius:5px;background:#fee2e2;color:#991b1b;font-size:11px;font-weight:bold">Tarama bekleniyor</div>' +
+      '<button id="aoe-load-old" style="grid-column:1/-1;background:#7c3aed;color:#fff;border:0;border-radius:5px;padding:6px;font-weight:bold;cursor:pointer">Dünkü DOCX Dosyasını Yükle</button>' +
+      '<div id="aoe-old-status" style="grid-column:1/-1;padding:5px;border-radius:5px;background:#f1f5f9;color:#475569;font-size:10px">Henüz DOCX yüklenmedi</div>' +
+      '<input id="aoe-old-file" type="file" accept=".docx" style="display:none">' +
+      '<button id="aoe-order-clinics" style="grid-column:1/-1;background:#334155;color:#fff;border:0;border-radius:5px;padding:6px;font-weight:bold;cursor:pointer">Klinik Sırasını Ayarla</button>' +
+      '<div id="aoe-order-summary" style="grid-column:1/-1;font-size:10px;color:#475569;line-height:1.25"></div>' +
+      '<button id="aoe-word-all" style="background:#166534;color:#fff;border:0;border-radius:5px;padding:6px;font-weight:bold;cursor:pointer">Word İndir</button>' +
+      '<button id="aoe-docs-all" style="background:#1d4ed8;color:#fff;border:0;border-radius:5px;padding:6px;font-weight:bold;cursor:pointer">Google Docs</button>';
+    target.appendChild(holder);
+    uiEl("aoe-word-all").onclick = aoeDownloadWord;
+    uiEl("aoe-docs-all").onclick = aoeGoogleDocs;
+    uiEl("aoe-load-old").onclick = () => { const input = uiEl("aoe-old-file"); input.value = ""; input.click(); };
+    uiEl("aoe-order-clinics").onclick = aoeConfigureClinicOrder;
+    uiEl("aoe-old-file").onchange = (event) => aoeLoadPreviousFile(event.target.files?.[0]);
+  }
+
+  state.downloadAllWord = aoeDownloadWord;
+  state.prepareAllGoogleDocs = aoeGoogleDocs;
+  state.openPatientDetail = openPatientDetailV16;
+  window.setInterval(() => {
+    if (!state.active) return;
+    aoeInstallExportButtons();
+    const badge = uiEl("aoe-ready");
+    const word = uiEl("aoe-word-all");
+    const docs = uiEl("aoe-docs-all");
+    const orderSummary = uiEl("aoe-order-summary");
+    if (!badge) return;
+    if (orderSummary) orderSummary.textContent = "Çıktı sırası: " + (aoeEffectiveClinicOrder().join(" → ") || "Hasta listesi bekleniyor");
+    const info = aoeReadiness();
+    if (info.ready) {
+      badge.textContent = "Hazır: " + info.total + "/" + info.total + " hasta tamamen tarandı" +
+        (state.aoePreviousFileName ? " • Günlük dosya: " + state.aoePreviousFileName : "");
+      badge.style.background = "#dcfce7"; badge.style.color = "#166534";
+    } else if (info.failures) {
+      badge.textContent = "Eksik: " + info.processed + "/" + info.total + " hasta, " + info.failures + " bölüm alınamadı";
+      badge.style.background = "#fef3c7"; badge.style.color = "#92400e";
+    } else {
+      badge.textContent = "Taranıyor: " + info.processed + "/" + info.total + " hasta";
+      badge.style.background = "#dbeafe"; badge.style.color = "#1e40af";
+    }
+    if (word) word.style.opacity = info.ready ? "1" : ".65";
+    if (docs) docs.style.opacity = info.ready ? "1" : ".65";
+  }, 700);
+
+})();

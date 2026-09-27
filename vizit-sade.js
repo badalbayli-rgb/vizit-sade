@@ -1,6 +1,7 @@
 (() => {
   /********************************************************************
-   * VİZİT SADE V1.7 KLİNİK PANEL
+   * VİZİT SADE V1.8 KLİNİK PANEL
+   * - V1.8: son 31 gündeki gerçek ameliyat servis yatışından önce olsa da POSTOP sayılır.
    * - V1.7: ERCP işlem paketi tek Takip satırı; punto ve PREOP/POSTOP rejim biçimi güncellendi.
    * - V1.6: BH alanında negatif/generic rapor metinlerinden yanlış CA üretimi engellendi.
    * - V1.5: görüntülemeler son 45 gün, abdomen USG ayrıntılı; tüm tetkik adları Takip'te.
@@ -1619,22 +1620,18 @@
     if (!list.length) return admission ? "PREOP" : "";
     const now = Date.now();
     const monthAgo = now - 31 * 24 * 60 * 60 * 1000;
-    const recent = list.filter((s) => {
-      const t = surgeryDateMs(s);
-      return t >= monthAgo || (admission && admission < monthAgo && t >= admission);
-    });
-    const candidates = recent.length ? recent : list;
-    const future = candidates
+    // Yoğun bakımdan/başka servisten yeni yatış gibi gelen hastada mevcut
+    // servis yatış tarihi ameliyat sonrası olabilir; son bir aylık gerçek ameliyat önceliklidir.
+    const performed = list
+      .map((s) => ({ s, actual:parseTrDate(s.startDate || s.endDate || "") }))
+      .filter((item) => item.actual && item.actual >= monthAgo && item.actual <= now)
+      .sort((a, b) => b.actual - a.actual)[0];
+    if (performed) return `POSTOP-${Math.max(0, dayDiff(performed.actual, now))}`;
+
+    const future = list
       .filter((s) => startOfDayMs(surgeryDateMs(s)) > startOfDayMs(now))
       .sort((a, b) => surgeryDateMs(a) - surgeryDateMs(b))[0];
-    if (future) return "PREOP";
-
-    const performed = candidates
-      .map((s) => ({ s, actual:parseTrDate(s.startDate || s.endDate || "") }))
-      .filter((item) => item.actual && item.actual <= now)
-      .sort((a, b) => b.actual - a.actual)[0];
-    if (!performed) return admission ? "PREOP" : "";
-    return `POSTOP-${Math.max(0, dayDiff(performed.actual, now))}`;
+    return future || admission ? "PREOP" : "";
   }
 
   function consultKey(c) {
@@ -5683,7 +5680,7 @@ ${consults || "-"}
       </style>
       <header id="fsl-drag-handle" class="vs-header" style="display:grid;grid-template-columns:minmax(210px,.7fr) minmax(280px,1.2fr) auto;align-items:center;gap:10px;padding:7px 9px;background:${t.header};color:${t.headerText};cursor:${state.popupMode ? "default" : "move"};user-select:none;border-bottom:1px solid ${t.border};">
         <div style="min-width:0;">
-          <b style="font-size:14px;">FONET Servis Canlı Paneli · VİZİT SADE V1.7</b>
+          <b style="font-size:14px;">FONET Servis Canlı Paneli · VİZİT SADE V1.8</b>
           <div style="font-size:10px;color:#bfdbfe;margin-top:2px;"><span id="fsl-status">hazır</span> · Son güncelleme <span id="fsl-last-updated">--:--</span></div>
         </div>
         <div class="vs-header-mid" style="display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;border:1px solid ${t.border};border-radius:7px;background:${t.surface};overflow:hidden;min-width:0;">
@@ -6076,13 +6073,13 @@ ${consults || "-"}
     const now = Date.now();
     const past = surgeries.filter((x) => surgeryDateMs(x) <= now).sort((a,b) => surgeryDateMs(b) - surgeryDateMs(a));
     const future = surgeries.filter((x) => surgeryDateMs(x) > now).sort((a,b) => surgeryDateMs(a) - surgeryDateMs(b));
-    const selected = past[0] || future[0];
     const performed = surgeries.filter((x) => {
       const actual = parseTrDate(x.startDate || x.endDate || "");
-      return clean(x.name || "") && actual && actual <= now;
+      return clean(x.name || "") && actual && actual >= now - 31 * 86400000 && actual <= now;
     }).sort((a, b) =>
       parseTrDate(b.startDate || b.endDate) - parseTrDate(a.startDate || a.endDate)
     )[0] || null;
+    const selected = performed || past[0] || future[0];
     return {
       date: aoeDate(selected.startDate || selected.baslangicTarihi || selected.endDate || selected.bitisTarihi || selected.requestDate || selected.istekTarihi),
       badge: operationBadge(p) || "",

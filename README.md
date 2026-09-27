@@ -52,6 +52,7 @@ Google Docs seçeneği biçimi koruyan DOCX dosyasını indirir ve Google Drive'
 - BH alanına `CA` yalnızca doğrulanmış kanser ifadesi varsa eklenir; "malignite/tümör izlenmedi" ve kalsiyum gibi kullanımlar CA sayılmaz.
 - Aynı tarihteki dört ERCP işlem kalemi Takip'te tek `19.08 ERCP` satırına birleştirilir.
 - TANI, OP ve PLAN 11 punto; rejim, yatış ve operasyon tarihi 10 punto yazılır. Rejim satırı `POSTOP 4-R1/Açık sıvı` biçimindedir; gerçekleşmiş ameliyat yoksa yatıştan itibaren `PREOP` kullanılır.
+- Genel Cerrahi hastasının son 31 günde gerçekleşmiş ameliyatı varsa ameliyat mevcut servis yatışından önce olsa bile POSTOP kabul edilir; bu, yoğun bakımdan servise gelen hastaları kapsar.
 
 ## Not
 

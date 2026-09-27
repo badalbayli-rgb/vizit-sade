@@ -1,6 +1,7 @@
 (() => {
   /********************************************************************
-   * VİZİT SADE V1.4 KLİNİK PANEL
+   * VİZİT SADE V1.5 KLİNİK PANEL
+   * - V1.5: görüntülemeler son 45 gün, abdomen USG ayrıntılı; tüm tetkik adları Takip'te.
    * - V1.4: rapor bölüm kuralları, diğer görüntülemeler Takip'te, aktif servis sayısı ve sabit export menüsü.
    * - V1.3: AutoExport yatış sonrası kons, seçili görüntüleme, güncel tanı ve kayıp hasta sonu.
    * - V1.2: exportta görüntüleme ve konsültasyonlar yalnızca son bir takvim ayı.
@@ -5660,7 +5661,7 @@ ${consults || "-"}
       </style>
       <header id="fsl-drag-handle" class="vs-header" style="display:grid;grid-template-columns:minmax(210px,.7fr) minmax(280px,1.2fr) auto;align-items:center;gap:10px;padding:7px 9px;background:${t.header};color:${t.headerText};cursor:${state.popupMode ? "default" : "move"};user-select:none;border-bottom:1px solid ${t.border};">
         <div style="min-width:0;">
-          <b style="font-size:14px;">FONET Servis Canlı Paneli · VİZİT SADE V1.4</b>
+          <b style="font-size:14px;">FONET Servis Canlı Paneli · VİZİT SADE V1.5</b>
           <div style="font-size:10px;color:#bfdbfe;margin-top:2px;"><span id="fsl-status">hazır</span> · Son güncelleme <span id="fsl-last-updated">--:--</span></div>
         </div>
         <div class="vs-header-mid" style="display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;border:1px solid ${t.border};border-radius:7px;background:${t.surface};overflow:hidden;min-width:0;">
@@ -5912,6 +5913,12 @@ ${consults || "-"}
     });
   }
 
+  function aoeWithinLastDays(value, days, nowMs = Date.now()) {
+    const stamp = parseTrDate(value);
+    const count = Math.max(1, Number(days) || 1);
+    return Boolean(stamp && stamp >= nowMs - count * 86400000 && stamp <= nowMs + 86400000);
+  }
+
   function aoeAllowedImaging(item) {
     const value = searchNorm(aoeImagingName(item))
       .replace(/\bcomputed tomography\b/g, " bt ")
@@ -5923,9 +5930,9 @@ ${consults || "-"}
         /endoskopik\s+(retrograd|ultrason)/.test(value) ||
         /mr\s+kolanji/.test(value) || /perkutan\s+transhepatik/.test(value)) return true;
     const isBt = /\bbt\b/.test(value);
-    if (!isBt) return false;
-    return /\btoraks\b/.test(value) ||
-      (/\babdomen\b/.test(value) && /\b(alt|ust|tum|total)\b/.test(value));
+    if (isBt && (/\btoraks\b/.test(value) ||
+      (/\babdomen\b/.test(value) && /\b(alt|ust|tum|total)\b/.test(value)))) return true;
+    return /\babdomen\b/.test(value) && /\b(us|usg|ultrason|ultrasonografi)\b/.test(value);
   }
 
   function aoeRecentImaging(p) {
@@ -5934,7 +5941,7 @@ ${consults || "-"}
 
   function aoeAllRecentImaging(p) {
     return (p.radiology || []).filter((x) =>
-      aoeWithinLastMonth(x.date || x.reportDate || x.tarih || x.raporTarihi)
+      aoeWithinLastDays(x.date || x.reportDate || x.tarih || x.raporTarihi, 45)
     );
   }
 
@@ -6131,7 +6138,7 @@ ${consults || "-"}
       const key = [group, norm(value), shortDate(when)].join("|");
       if (!events.some((x) => x.key === key)) events.push({ key, group, label:value, date:when });
     };
-    aoeAllRecentImaging(p).filter((item) => !aoeAllowedImaging(item)).forEach((item) => {
+    aoeAllRecentImaging(p).forEach((item) => {
       const name = aoeImagingName(item);
       if (name) add(1, name, item.date || item.reportDate);
     });

@@ -43,9 +43,10 @@ Google Docs seçeneği biçimi koruyan DOCX dosyasını indirir ve Google Drive'
 - Gözlem: en güncel hemşire devir notu
 - Tarihli görüntüleme ve konsültasyon bölümleri
 - Exportta konsültasyonlar hem son bir takvim ayıyla hem de hastanın yatış tarih-saatinden sonrasıyla sınırlandırılır.
-- Görüntülemede yalnızca alt/üst/tüm abdomen BT, toraks BT, MRCP, ERCP, EUS ve PTK gösterilir.
+- Görüntülemeler son 45 günle sınırlandırılır.
+- Ayrıntılı Görüntüleme bölümünde alt/üst/tüm abdomen BT, toraks BT, abdomen USG, MRCP, ERCP, EUS ve PTK gösterilir.
 - BT raporlarında `SONUÇ:` başlığından önceki metin; ERCP ve EUS raporlarında yalnızca `SONUÇ:` bölümü yazılır.
-- EKG, PAAG, ADBG ve ayrıntılı Görüntüleme bölümüne girmeyen diğer son bir aylık görüntülemeler Takip'te yalnızca ad olarak listelenir.
+- EKG, PAAG, ADBG, BT, ERCP, PTK ve diğer tüm son 45 günlük görüntülemeler Takip'te yalnızca ad olarak listelenir.
 - Eski DOCX'te olup güncel FONET hasta listesinde olmayan hastalar belgenin en sonunda kırmızı korunur.
 - Eski DOCX'ten eşleşen hastaların sabit alanları kilitli kalır. Yeni hastaların tanısında en son yanıtlanan Genel Cerrahi konsültasyonu, yoksa FONET tanı listesi kullanılır.
 

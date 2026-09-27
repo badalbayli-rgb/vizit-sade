@@ -1,6 +1,7 @@
 (() => {
   /********************************************************************
-   * VİZİT SADE V1.3 KLİNİK PANEL
+   * VİZİT SADE V1.4 KLİNİK PANEL
+   * - V1.4: rapor bölüm kuralları, diğer görüntülemeler Takip'te, aktif servis sayısı ve sabit export menüsü.
    * - V1.3: AutoExport yatış sonrası kons, seçili görüntüleme, güncel tanı ve kayıp hasta sonu.
    * - V1.2: exportta görüntüleme ve konsültasyonlar yalnızca son bir takvim ayı.
    * - V1.1: kompakt üst bar, servis özeti, birleşik filtreler, 4-5 sütun kartlar,
@@ -575,7 +576,8 @@
       if (!p.clinical && preserved.clinical) merged.clinical = preserved.clinical;
       map.set(key, merged);
     });
-    state.patients = sortPatientsForDisplay(Array.from(map.values()).filter((p) => incomingKeys.has(displayKey(p)) || seenNow - Number(p.seenInServiceAt || seenNow) < 300000));
+    // Servis ekranındaki güncel liste tek kaynaktır; kapanmış/gizli grid hastalarını bekletme.
+    state.patients = sortPatientsForDisplay(Array.from(map.values()).filter((p) => incomingKeys.has(displayKey(p))));
     return state.patients;
   }
 
@@ -698,6 +700,10 @@
 
     try {
       Ext.ComponentQuery.query("gridpanel, grid").forEach((grid) => {
+        try {
+          if (typeof grid.isVisible === "function" && !grid.isVisible(true)) return;
+          if (grid.hidden === true || grid.isHidden?.() === true) return;
+        } catch (e) {}
         let store = null;
         try { store = grid.getStore?.(); } catch (e) {}
         if (!store) return;
@@ -759,7 +765,18 @@
   function collectServicePatients(shouldRender = true) {
     const dom = collectPatientRowsFromDom();
     const ext = collectPatientRowsFromExt();
-    mergePatients([...dom, ...ext]);
+    let rows = ext;
+    if (dom.length) {
+      const identity = (p) => [aoeRoomIdentity(p.oda || ""), aoeLooseIdentity(p.adSoyad || "")].join("|");
+      const active = new Map(dom.map((p) => [identity(p), p]));
+      const matchingExt = ext.map((p) => {
+        const visible = active.get(identity(p));
+        return visible ? { ...p, oda:visible.oda, adSoyad:visible.adSoyad } : null;
+      }).filter(Boolean);
+      // DOM'da görünen servis hastalarını koru; ExtJS yalnızca kimlik bilgilerini tamamlasın.
+      rows = [...dom, ...matchingExt];
+    }
+    mergePatients(rows);
     state.lastMessage = `${state.patients.length} servis hastası toplandı.`;
     if (shouldRender) render();
     return state.patients;
@@ -3572,7 +3589,7 @@ ${consults || "-"}
     p.radiology = rows
       .filter((x, i, arr) => arr.findIndex((y) => radiologyIdentity(y) === radiologyIdentity(x)) === i)
       .sort((a, b) => String(dateTimeKey(b.istemTarihi || b.risKabulTarihi || "")).localeCompare(String(dateTimeKey(a.istemTarihi || a.risKabulTarihi || ""))))
-      .slice(0, 12)
+      .slice(0, 50)
       .map((x) => {
         const item = {
           id: x.risOrderId || x.raporId,
@@ -3594,7 +3611,11 @@ ${consults || "-"}
         return item;
       });
 
-    for (const item of p.radiology) {
+    for (let index = 0; index < p.radiology.length; index += 1) {
+      const item = p.radiology[index];
+      // Ayrıntılı export tetkiklerinin raporunu ve panel için ilk 12 raporu indir;
+      // diğerlerinde Takip bölümü için ad/tarih yeterlidir.
+      if (index >= 12 && !aoeAllowedImaging(item)) continue;
       if (!item.reportId || item.reportText) continue;
       try {
         const fetchedText = await fetchRadiologyReportText(item.reportId);
@@ -5633,13 +5654,13 @@ ${consults || "-"}
         #vizit-sade-live-panel .vs-summary{display:flex;gap:7px;align-items:center;overflow-x:auto;padding:6px 10px;background:${t.surface};border-bottom:1px solid ${t.border}}
         #vizit-sade-live-panel .vs-summary-item{display:inline-flex;gap:6px;align-items:center;border-left:3px solid;padding:3px 8px;background:${t.surface2};border-radius:5px;white-space:nowrap;font-size:11px;color:${t.text}}
         #vizit-sade-live-panel .vs-summary-item strong{font-size:13px}
-        #vizit-sade-live-panel .vs-tools{position:absolute;right:8px;top:38px;z-index:30;width:280px;padding:9px;border:1px solid ${t.border};border-radius:9px;background:${t.surface};box-shadow:0 12px 28px rgba(15,23,42,.22)}
+        #vizit-sade-live-panel .vs-tools{position:absolute;right:8px;top:38px;z-index:30;width:340px;max-height:calc(100vh - 80px);overflow-y:auto;overscroll-behavior:contain;padding:9px;border:1px solid ${t.border};border-radius:9px;background:${t.surface};box-shadow:0 12px 28px rgba(15,23,42,.22)}
         #vizit-sade-live-panel .vs-tools-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px}
         @media(max-width:900px){#vizit-sade-live-panel .vs-header{grid-template-columns:1fr!important}#vizit-sade-live-panel .vs-header-mid{order:3}#vizit-sade-live-panel .vs-controls{overflow-x:auto}#fsl-patient-modal section{grid-template-columns:1fr!important}}
       </style>
       <header id="fsl-drag-handle" class="vs-header" style="display:grid;grid-template-columns:minmax(210px,.7fr) minmax(280px,1.2fr) auto;align-items:center;gap:10px;padding:7px 9px;background:${t.header};color:${t.headerText};cursor:${state.popupMode ? "default" : "move"};user-select:none;border-bottom:1px solid ${t.border};">
         <div style="min-width:0;">
-          <b style="font-size:14px;">FONET Servis Canlı Paneli · VİZİT SADE V1.2</b>
+          <b style="font-size:14px;">FONET Servis Canlı Paneli · VİZİT SADE V1.4</b>
           <div style="font-size:10px;color:#bfdbfe;margin-top:2px;"><span id="fsl-status">hazır</span> · Son güncelleme <span id="fsl-last-updated">--:--</span></div>
         </div>
         <div class="vs-header-mid" style="display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;border:1px solid ${t.border};border-radius:7px;background:${t.surface};overflow:hidden;min-width:0;">
@@ -5898,7 +5919,9 @@ ${consults || "-"}
       .replace(/\s+/g, " ")
       .trim();
     if (!value) return false;
-    if (/\b(mrcp|ercp|ptk)\b/.test(value)) return true;
+    if (/\b(mrcp|ercp|eus|ptk)\b/.test(value) ||
+        /endoskopik\s+(retrograd|ultrason)/.test(value) ||
+        /mr\s+kolanji/.test(value) || /perkutan\s+transhepatik/.test(value)) return true;
     const isBt = /\bbt\b/.test(value);
     if (!isBt) return false;
     return /\btoraks\b/.test(value) ||
@@ -5906,9 +5929,27 @@ ${consults || "-"}
   }
 
   function aoeRecentImaging(p) {
+    return aoeAllRecentImaging(p).filter(aoeAllowedImaging);
+  }
+
+  function aoeAllRecentImaging(p) {
     return (p.radiology || []).filter((x) =>
-      aoeWithinLastMonth(x.date || x.reportDate || x.tarih || x.raporTarihi) && aoeAllowedImaging(x)
+      aoeWithinLastMonth(x.date || x.reportDate || x.tarih || x.raporTarihi)
     );
+  }
+
+  function aoeImagingReport(item) {
+    const report = cleanMultiline(item?.reportText || item?.report || "");
+    if (!report) return "";
+    const name = searchNorm(aoeImagingName(item));
+    const result = /\bSONU[\u00c7C]\s*:\s*/i;
+    const match = result.exec(report);
+    if (/\b(ercp|eus)\b/.test(name) || /endoskopik\s+(retrograd|ultrason)/.test(name)) {
+      return match ? cleanMultiline(report.slice(match.index + match[0].length)) : "";
+    }
+    const isBt = /\b(bt|ct)\b/.test(name) || /computed\s+tomography/.test(name);
+    if (isBt && match) return cleanMultiline(report.slice(0, match.index));
+    return report;
   }
 
   function aoeDrugName(value) {
@@ -6090,7 +6131,7 @@ ${consults || "-"}
       const key = [group, norm(value), shortDate(when)].join("|");
       if (!events.some((x) => x.key === key)) events.push({ key, group, label:value, date:when });
     };
-    aoeRecentImaging(p).forEach((item) => {
+    aoeAllRecentImaging(p).filter((item) => !aoeAllowedImaging(item)).forEach((item) => {
       const name = aoeImagingName(item);
       if (name) add(1, name, item.date || item.reportDate);
     });
@@ -6100,6 +6141,10 @@ ${consults || "-"}
       ...((p.clinicalHistory || []).map((row) => ({ text:clean(row.text || row.klinikIzlem || row.aciklama), date:row.date || row.tarih, amount:"" })))
     ];
     sources.forEach((item) => {
+      if (aoeWithinLastMonth(item.date)) {
+        const imagingOrder = clean(item.text).match(/\b(EKG|PAAG|ADBG)\b|PA\s+AKCİĞER\s+GRAFİSİ|AYAKTA\s+DİREKT\s+BATIN\s+GRAFİSİ/i)?.[0];
+        if (imagingOrder) add(1, imagingOrder.toLocaleUpperCase("tr-TR"), item.date);
+      }
       if (/biyopsi|tru[ -]?cut|insizyonel\s+biyopsi|eksizyonel\s+biyopsi/i.test(item.text)) add(3, "Biyopsi", item.date);
       const blood = aoeBloodPreparationLabel(item.text, item.amount);
       if (blood) add(4, blood, item.date);
@@ -6308,7 +6353,7 @@ ${consults || "-"}
       "<div class=\"nursing-item\"><b>(" + aoeEsc(aoeDate(x.date) || "—") + ")</b> " + aoeEsc(x.text) + "</div>"
     ).join("") || "—";
     const imaging = aoeRecentImaging(p).filter((x) => aoeImagingName(x)).map((x) => {
-      const report = cleanMultiline(x.reportText || x.report || "");
+      const report = aoeImagingReport(x);
       return "<div class=\"imaging-item" + (report ? " has-report" : "") + "\"><b>" +
         aoeEsc(aoeDate(x.date || x.reportDate) || "—") + ": " + aoeEsc(aoeImagingName(x)) + "</b>" +
         (report ? "<br>" + aoeEsc(report) : "") + "</div>";
@@ -6391,8 +6436,8 @@ ${consults || "-"}
   }
 
   function aoeReadiness() {
-    const total = Number(state.metrics?.total || state.patients?.length || 0);
-    const processed = Number(state.metrics?.processed || 0);
+    const total = Number(state.patients?.length || 0);
+    const processed = Math.min(total, Number(state.metrics?.processed || 0));
     const failures = (state.patients || []).reduce((sum, p) => sum + (p.lastFailedLabels || []).length, 0);
     const loading = (state.patients || []).filter((p) => p.loading).length;
     const ready = Boolean(state.bootstrapComplete && !state.busy && total > 0 && processed >= total && !loading && !failures);
@@ -6561,7 +6606,7 @@ ${consults || "-"}
     paragraphs.push(aoeWordParagraph("Görüntüleme:", { size:10, bold:true, keep:true }));
     const namedImaging = aoeRecentImaging(p).filter((x) => aoeImagingName(x));
     namedImaging.forEach((x, index) => {
-      const report = cleanMultiline(x.reportText || x.report || "");
+      const report = aoeImagingReport(x);
       paragraphs.push(aoeWordRichParagraph([
         { text:(aoeDate(x.date || x.reportDate) || "—") + ": ", bold:true },
         { text:aoeImagingName(x), bold:true },
@@ -7024,14 +7069,14 @@ ${consults || "-"}
     const target = uiEl("fsl-export-tools");
     if (!root || !target || uiEl("aoe-word-all")) return;
     const holder = uiDocument().createElement("div");
-    holder.style.cssText = "display:grid;grid-template-columns:1fr 1fr;gap:5px;padding-top:7px;border-top:1px solid #cbd5e1";
+    holder.style.cssText = "display:grid;grid-template-columns:1fr 1fr;grid-template-rows:28px 32px 28px 32px 42px 32px;gap:5px;padding-top:7px;border-top:1px solid #cbd5e1;min-height:219px";
     holder.innerHTML =
-      '<div id="aoe-ready" style="grid-column:1/-1;padding:5px;border-radius:5px;background:#fee2e2;color:#991b1b;font-size:11px;font-weight:bold">Tarama bekleniyor</div>' +
+      '<div id="aoe-ready" style="grid-column:1/-1;height:28px;padding:6px;border-radius:5px;background:#fee2e2;color:#991b1b;font-size:11px;font-weight:bold;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Tarama bekleniyor</div>' +
       '<button id="aoe-load-old" style="grid-column:1/-1;background:#7c3aed;color:#fff;border:0;border-radius:5px;padding:6px;font-weight:bold;cursor:pointer">Dünkü DOCX Dosyasını Yükle</button>' +
-      '<div id="aoe-old-status" style="grid-column:1/-1;padding:5px;border-radius:5px;background:#f1f5f9;color:#475569;font-size:10px">Henüz DOCX yüklenmedi</div>' +
+      '<div id="aoe-old-status" style="grid-column:1/-1;height:28px;padding:6px;border-radius:5px;background:#f1f5f9;color:#475569;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Henüz DOCX yüklenmedi</div>' +
       '<input id="aoe-old-file" type="file" accept=".docx" style="display:none">' +
       '<button id="aoe-order-clinics" style="grid-column:1/-1;background:#334155;color:#fff;border:0;border-radius:5px;padding:6px;font-weight:bold;cursor:pointer">Klinik Sırasını Ayarla</button>' +
-      '<div id="aoe-order-summary" style="grid-column:1/-1;font-size:10px;color:#475569;line-height:1.25"></div>' +
+      '<div id="aoe-order-summary" style="grid-column:1/-1;height:42px;font-size:10px;color:#475569;line-height:1.25;overflow-y:auto"></div>' +
       '<button id="aoe-word-all" style="background:#166534;color:#fff;border:0;border-radius:5px;padding:6px;font-weight:bold;cursor:pointer">Word İndir</button>' +
       '<button id="aoe-docs-all" style="background:#1d4ed8;color:#fff;border:0;border-radius:5px;padding:6px;font-weight:bold;cursor:pointer">Google Docs</button>';
     target.appendChild(holder);
@@ -7047,6 +7092,8 @@ ${consults || "-"}
   state.openPatientDetail = openPatientDetailV16;
   state.exportIncludesDate = aoeWithinLastMonth;
   state.exportRecentConsults = aoeRecentConsults;
+  state.exportRecentImaging = aoeRecentImaging;
+  state.exportImagingReport = aoeImagingReport;
   state.exportConsultFacts = aoeConsultFacts;
   window.setInterval(() => {
     if (!state.active) return;

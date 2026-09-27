@@ -1,6 +1,7 @@
 (() => {
   /********************************************************************
-   * VİZİT SADE V1.1 KLİNİK PANEL
+   * VİZİT SADE V1.2 KLİNİK PANEL
+   * - V1.2: exportta görüntüleme ve konsültasyonlar yalnızca son bir takvim ayı.
    * - V1.1: kompakt üst bar, servis özeti, birleşik filtreler, 4-5 sütun kartlar,
    *   sağ detay çekmecesi, bağımsız ayarlar ve parçalı kart güncellemesi
    * - Kullanıcı tek tek hasta açmadan açık servis hasta listesini toplar
@@ -5632,7 +5633,7 @@ ${consults || "-"}
       </style>
       <header id="fsl-drag-handle" class="vs-header" style="display:grid;grid-template-columns:minmax(210px,.7fr) minmax(280px,1.2fr) auto;align-items:center;gap:10px;padding:7px 9px;background:${t.header};color:${t.headerText};cursor:${state.popupMode ? "default" : "move"};user-select:none;border-bottom:1px solid ${t.border};">
         <div style="min-width:0;">
-          <b style="font-size:14px;">FONET Servis Canlı Paneli · VİZİT SADE V1.1</b>
+          <b style="font-size:14px;">FONET Servis Canlı Paneli · VİZİT SADE V1.2</b>
           <div style="font-size:10px;color:#bfdbfe;margin-top:2px;"><span id="fsl-status">hazır</span> · Son güncelleme <span id="fsl-last-updated">--:--</span></div>
         </div>
         <div class="vs-header-mid" style="display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;border:1px solid ${t.border};border-radius:7px;background:${t.surface};overflow:hidden;min-width:0;">
@@ -5860,6 +5861,29 @@ ${consults || "-"}
     return m ? m[1] + "." + m[2] + "." + m[3] : clean(v);
   }
 
+  function aoeOneMonthCutoff(now = new Date()) {
+    const cutoff = new Date(now.getTime());
+    const day = cutoff.getDate();
+    cutoff.setHours(0, 0, 0, 0);
+    cutoff.setDate(1);
+    cutoff.setMonth(cutoff.getMonth() - 1);
+    cutoff.setDate(Math.min(day, new Date(cutoff.getFullYear(), cutoff.getMonth() + 1, 0).getDate()));
+    return cutoff.getTime();
+  }
+
+  function aoeWithinLastMonth(value, nowMs = Date.now()) {
+    const stamp = parseTrDate(value);
+    return Boolean(stamp && stamp >= aoeOneMonthCutoff(new Date(nowMs)) && stamp <= nowMs + 86400000);
+  }
+
+  function aoeRecentConsults(p) {
+    return (p.consults || []).filter((x) => aoeWithinLastMonth(x.date || x.tarih || x.requestDate || x.istemTarihi));
+  }
+
+  function aoeRecentImaging(p) {
+    return (p.radiology || []).filter((x) => aoeWithinLastMonth(x.date || x.reportDate || x.tarih || x.raporTarihi));
+  }
+
   function aoeDrugName(value) {
     const original = clean(value).toLocaleUpperCase("tr-TR");
     const ingredientNames = [
@@ -5909,14 +5933,14 @@ ${consults || "-"}
   }
 
   function aoeConsultFacts(p) {
-    const answers = (p.consults || []).map((x) => cleanMultiline(x.answer || "")).filter(Boolean);
-    const text = answers.join("\n");
+    const allAnswers = (p.consults || []).map((x) => cleanMultiline(x.answer || "")).filter(Boolean);
+    const text = allAnswers.join("\n");
     const field = (label) => {
       const pattern = new RegExp("(?:^|\\n|[.;])\\s*" + label + "\\s*[:\\-]\\s*([^\\n;]+?)(?=\\s+(?:BH|Kİ|KI|GO|ASA)\\s*[:\\-]|$)", "i");
       return clean(text.match(pattern)?.[1] || "");
     };
     let diagnosis = "";
-    for (const answer of answers) {
+    for (const answer of allAnswers) {
       const sentences = answer.split(/(?<=[.!?])\s+|\n+/).map(clean).filter(Boolean);
       for (const sentence of sentences) {
         const match = sentence.match(/(?:hastanın\s+)?(.{3,100}?)\s+(tanısı|tanisi|nedeni)\s+ile\s+(?:yatışı|yatisi|yatış|yatis)\s+(?:uygundur|uygun)/i);
@@ -6025,7 +6049,7 @@ ${consults || "-"}
       const key = [group, norm(value), shortDate(when)].join("|");
       if (!events.some((x) => x.key === key)) events.push({ key, group, label:value, date:when });
     };
-    (p.radiology || []).forEach((item) => {
+    aoeRecentImaging(p).forEach((item) => {
       const name = aoeImagingName(item);
       if (name) add(1, name, item.date || item.reportDate);
     });
@@ -6242,14 +6266,14 @@ ${consults || "-"}
     const nursing = nursingRows.map((x) =>
       "<div class=\"nursing-item\"><b>(" + aoeEsc(aoeDate(x.date) || "—") + ")</b> " + aoeEsc(x.text) + "</div>"
     ).join("") || "—";
-    const imaging = (p.radiology || []).filter((x) => aoeImagingName(x)).map((x) => {
+    const imaging = aoeRecentImaging(p).filter((x) => aoeImagingName(x)).map((x) => {
       const report = cleanMultiline(x.reportText || x.report || "");
       return "<div class=\"imaging-item" + (report ? " has-report" : "") + "\"><b>" +
         aoeEsc(aoeDate(x.date || x.reportDate) || "—") + ": " + aoeEsc(aoeImagingName(x)) + "</b>" +
         (report ? "<br>" + aoeEsc(report) : "") + "</div>";
     }
     ).join("") || "—";
-    const consults = (p.consults || []).filter((x) => clean(x.answer)).map((x) =>
+    const consults = aoeRecentConsults(p).filter((x) => clean(x.answer)).map((x) =>
       "<div class=\"consult-item\"><b>(" + aoeEsc(aoeDate(x.date) || "—") + ") " + aoeEsc(x.unit || "Konsültasyon") +
       "</b><br>" + aoeEsc(x.answer) + "</div>"
     ).join("") || "—";
@@ -6482,7 +6506,7 @@ ${consults || "-"}
     )); else if (!followEvents.length) paragraphs.push(aoeWordParagraph("—", { size:9 }));
     paragraphs.push(aoeWordParagraph("", { size:9 }));
     paragraphs.push(aoeWordParagraph("Konsültasyonlar:", { size:9, bold:true, keep:true }));
-    const answeredConsults = (p.consults || []).filter((x) => clean(x.answer));
+    const answeredConsults = aoeRecentConsults(p).filter((x) => clean(x.answer));
     answeredConsults.forEach((x, index) => {
       paragraphs.push(aoeWordRichParagraph([
         { text:"(" + (aoeDate(x.date) || "—") + ") ", bold:true },
@@ -6494,7 +6518,7 @@ ${consults || "-"}
     if (!answeredConsults.length) paragraphs.push(aoeWordParagraph("—", { size:9 }));
     paragraphs.push(aoeWordParagraph("", { size:9 }));
     paragraphs.push(aoeWordParagraph("Görüntüleme:", { size:10, bold:true, keep:true }));
-    const namedImaging = (p.radiology || []).filter((x) => aoeImagingName(x));
+    const namedImaging = aoeRecentImaging(p).filter((x) => aoeImagingName(x));
     namedImaging.forEach((x, index) => {
       const report = cleanMultiline(x.reportText || x.report || "");
       paragraphs.push(aoeWordRichParagraph([
@@ -6978,6 +7002,9 @@ ${consults || "-"}
   state.downloadAllWord = aoeDownloadWord;
   state.prepareAllGoogleDocs = aoeGoogleDocs;
   state.openPatientDetail = openPatientDetailV16;
+  state.exportIncludesDate = aoeWithinLastMonth;
+  state.exportRecentConsults = aoeRecentConsults;
+  state.exportConsultFacts = aoeConsultFacts;
   window.setInterval(() => {
     if (!state.active) return;
     aoeInstallExportButtons();

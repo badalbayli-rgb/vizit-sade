@@ -42,6 +42,7 @@ Google Docs seçeneği biçimi koruyan DOCX dosyasını indirir ve Google Drive'
 - Takip: tarihli klinik izlem kayıtları
 - Gözlem: en güncel hemşire devir notu
 - Tarihli görüntüleme ve konsültasyon bölümleri
+- Exportta yalnızca Görüntüleme ve Konsültasyonlar listeleri son bir takvim ayıyla sınırlandırılır; tanı, BH, Kİ, GO ve diğer alanlar mevcut tüm veriden üretilmeye devam eder.
 
 ## Not
 

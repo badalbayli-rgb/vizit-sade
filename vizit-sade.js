@@ -3567,11 +3567,13 @@ ${consults || "-"}
   }
 
   async function fetchRadiologyReportText(reportId) {
-    if (!reportId) return "";
+    if (!reportId) return { text:"", reportDate:"" };
     const data = await apiJson(`/Ris/RisHizmetSonuc/getRisRaporSonucByRaporId/${reportId}`);
     const text = radiologyReportText(data);
     if (text) state.radiologyTextCache[clean(reportId)] = text;
-    return text;
+    const root = data?.data || data || {};
+    const reportDate = root.raporOnayTarihi || root.onayTarihi || root.raporTarihi || root.eklemeTarihi || "";
+    return { text, reportDate };
   }
 
   async function fetchRadiology(p) {
@@ -3639,11 +3641,12 @@ ${consults || "-"}
       const item = p.radiology[index];
       // Ayrıntılı export tetkiklerinin raporunu ve panel için ilk 12 raporu indir;
       // diğerlerinde Takip bölümü için ad/tarih yeterlidir.
-      if (index >= 12 && !aoeAllowedImaging(item)) continue;
+      if (index >= 12 && !aoeAllowedImaging(item) && !aoeIsImageGuidedBiopsy(item)) continue;
       if (!item.reportId || item.reportText) continue;
       try {
-        const fetchedText = await fetchRadiologyReportText(item.reportId);
-        if (fetchedText) item.reportText = fetchedText;
+        const fetched = await fetchRadiologyReportText(item.reportId);
+        if (fetched.text) item.reportText = fetched.text;
+        if (fetched.reportDate) item.reportDate = fetched.reportDate;
       } catch (e) {
         p.errors = p.errors || [];
         p.errors.push(`Rad rapor ${item.reportId}: ${e.message}`);
@@ -6011,6 +6014,13 @@ ${consults || "-"}
     return report;
   }
 
+  function aoeIsImageGuidedBiopsy(item = {}) {
+    const text = searchNorm([
+      aoeImagingName(item), item.reportText, item.report, item.aciklama
+    ].filter(Boolean).join(" "));
+    return /(?:goruntuleme|us|ultrason).*esliginde.*(?:karaciger.*lezyon.*)?bi(?:y)?opsi|tru[ -]?cut.*bi(?:y)?opsi/.test(text);
+  }
+
   function aoeConsultAnswerExcerpt(value) {
     const text = cleanMultiline(value || "");
     if (!text) return "";
@@ -6248,7 +6258,9 @@ ${consults || "-"}
     };
     aoeAllRecentImaging(p).forEach((item) => {
       const name = aoeImagingName(item);
-      if (name) add(1, name, item.date || item.reportDate || item.tarih || item.raporTarihi);
+      if (aoeIsImageGuidedBiopsy(item)) {
+        add(3, "Biyopsi", item.reportDate || item.raporTarihi || item.date || item.tarih);
+      } else if (name) add(1, name, item.date || item.reportDate || item.tarih || item.raporTarihi);
     });
     (p.cultures || []).forEach((item) => add(2, item.name || "Kültür", item.date));
     aoeRecentConsults(p).forEach((item) => {

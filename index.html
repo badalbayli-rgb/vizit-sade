@@ -23,7 +23,7 @@
     <li>Fonet servis hasta listesini açın ve eklediğiniz <b>Vizit Sade</b> yer imine basın.</li>
   </ol>
   <a id="bookmark" class="bookmark" title="Bu düğmeyi yer imleri çubuğuna sürükleyin"
-     href="javascript:(async()=>{try{const u='https://raw.githubusercontent.com/badalbayli-rgb/vizit-sade/main/vizit-sade.js';const r=await fetch(u+'?t='+Date.now(),{cache:'no-store',credentials:'omit'});if(!r.ok)throw new Error('GitHub HTTP '+r.status);const c=await r.text();if(!c.includes('__VIZIT_SADE__'))throw new Error('Vizit Sade dosyasi dogrulanamadi');(0,eval)(c+'\n//# sourceURL=vizit-sade.js')}catch(e){alert('Vizit Sade yuklenemedi:\n'+(e&&e.message?e.message:e))}})()">Vizit Sade</a>
+     href="javascript:(async()=>{try{const u='https://api.github.com/repos/badalbayli-rgb/vizit-sade/contents/vizit-sade.js?ref=main&amp;t='+Date.now();const r=await fetch(u,{cache:'no-store',credentials:'omit',headers:{Accept:'application/vnd.github.raw+json'}});if(!r.ok)throw new Error('GitHub HTTP '+r.status);const c=await r.text();if(!c.includes('__VIZIT_SADE__'))throw new Error('Vizit Sade dosyasi dogrulanamadi');(0,eval)(c+'\n//# sourceURL=vizit-sade.js')}catch(e){alert('Vizit Sade yuklenemedi:\n'+(e&amp;&amp;e.message?e.message:e))}})()">Vizit Sade</a>
   <button id="copy" class="copy" type="button">Bookmarklet kodunu kopyala</button>
   <p id="result" aria-live="polite"></p>
   <div class="note">Telefon tarayıcıları sürükle-bırak desteklemeyebilir. Bilgisayarda Chrome veya Edge kullanılması önerilir.</div>

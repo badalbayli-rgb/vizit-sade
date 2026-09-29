@@ -19,6 +19,10 @@ Fonet Canlı Vizit'in çalışan hasta toplama ve ayrıntı çekme altyapısın�
 3. Panel hastaları toplar ve ayrıntıları arka planda tarar.
 4. **Araçlar** menüsünden Word, Google Docs, eski DOCX yükleme ve klinik sırası seçeneklerine erişin.
 
+Bookmarklet yalnızca yükleyicidir ve her tıklamada `main` dalındaki güncel `vizit-sade.js`
+dosyasını GitHub API üzerinden önbelleksiz indirir. Yeni sürümlerde yeniden bookmark
+oluşturmak gerekmez; FONET sekmesinde mevcut bookmark'a yeniden tıklamak yeterlidir.
+
 Google Docs seçeneği biçimi koruyan DOCX dosyasını indirir ve Google Drive'ı açar.
 
 ## Klinik panel

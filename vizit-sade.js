@@ -5980,7 +5980,7 @@ ${consults || "-"}
     const isBt = /\bbt\b/.test(value);
     if (isBt && (/\btoraks\b/.test(value) ||
       (/\babdomen\b/.test(value) && /\b(alt|ust|tum|total)\b/.test(value)))) return true;
-    return (/\babdomen\b/.test(value) || /\bhepatobiliyer\b/.test(value)) && /\b(us|usg|ultrason|ultrasonografi)\b/.test(value);
+    return (/\babdomen\b/.test(value) || /\bhepatobili(?:yer|er)\b/.test(value)) && /\b(us|usg|ultrason|ultrasonografi)\b/.test(value);
   }
 
   function aoeRecentImaging(p) {
@@ -6010,7 +6010,7 @@ ${consults || "-"}
   function aoeConsultAnswerExcerpt(value) {
     const text = cleanMultiline(value || "");
     if (!text) return "";
-    const marker = /\b(ÖNERİLER|ONERILER|ÖNERİ|ONERI|SONUÇ|SONUC)\s*[:\-]?\s*/i.exec(text);
+    const marker = /(?:^|[\s\n\r])(ÖNERİLER|ONERILER|ÖNERİ|ONERI|SONUÇ|SONUC)\s*[:\-]?\s*/i.exec(text);
     return marker ? cleanMultiline(text.slice(marker.index).replace(/^\s+/, "")) : text;
   }
 
@@ -6169,7 +6169,7 @@ ${consults || "-"}
       const text = clean(row?.text || row?.klinikIzlem || row?.aciklama);
       const stamp = parseTrDate(row?.date || row?.tarih);
       return text && (!admission || (stamp && stamp >= admission));
-    }).sort((a, b) => (parseTrDate(b.date || b.tarih) || 0) - (parseTrDate(a.date || a.tarih) || 0));
+    }).sort((a, b) => (parseTrDate(b.date || b.tarih) || 0) - (parseTrDate(a.date || a.tarih) || 0)).slice(0, 1);
   }
 
   function aoeOrderEventText(row = {}) {
@@ -6244,7 +6244,7 @@ ${consults || "-"}
     };
     aoeAllRecentImaging(p).forEach((item) => {
       const name = aoeImagingName(item);
-      if (name) add(1, name, item.date || item.reportDate);
+      if (name) add(1, name, item.date || item.reportDate || item.tarih || item.raporTarihi);
     });
     (p.cultures || []).forEach((item) => add(2, item.name || "Kültür", item.date));
     aoeRecentConsults(p).forEach((item) => {
@@ -6260,7 +6260,7 @@ ${consults || "-"}
         const imagingOrder = clean(item.text).match(/\b(EKG|PAAG|ADBG)\b|PA\s+AKCİĞER\s+GRAFİSİ|AYAKTA\s+DİREKT\s+BATIN\s+GRAFİSİ/i)?.[0];
         if (imagingOrder) add(1, imagingOrder.toLocaleUpperCase("tr-TR"), item.date);
       }
-      if (/biyopsi|tru[ -]?cut|insizyonel\s+biyopsi|eksizyonel\s+biyopsi/i.test(item.text)) add(3, "Biyopsi", item.date);
+      if (/bi(?:y)?opsi|tru[ -]?cut/i.test(item.text)) add(3, "Biyopsi", item.date);
       const blood = aoeBloodPreparationLabel(item.text, item.amount);
       if (blood) add(4, blood, item.date);
     });
@@ -6365,7 +6365,7 @@ ${consults || "-"}
 
   function aoeClinicName(p) {
     const raw = clean(p.birim || p.servis || p.klinik || "DİĞER KLİNİKLER");
-    return /gastroenterolojik\s*cerrahi|onkolojik\s*cerrahi/i.test(raw)
+    return /gastroenteroloji(?:k)?\s*cerrahi|onkolojik\s*cerrahi/i.test(raw)
       ? "GASTROENTEROLOJİK VE ONKOLOJİK CERRAHİ" : raw;
   }
 
@@ -6379,7 +6379,7 @@ ${consults || "-"}
       const no = Number(value.match(/(?:kliniği|klinigi|servisi|servis)?\s*([1-4])\b/)?.[1] || value.match(/\b([1-4])\b/)?.[1] || 0);
       return ({ 2:0, 1:1, 3:3, 4:4 })[no] ?? 5;
     }
-    if (/gastroenterolojik.*onkolojik|gastroenterolojik\s*cerrahi|onkolojik\s*cerrahi/.test(value)) return 2;
+    if (/gastroenteroloji(?:k)?.*onkolojik|gastroenteroloji(?:k)?\s*cerrahi|onkolojik\s*cerrahi/.test(value)) return 2;
     if (/yoğun\s*bakım|yogun\s*bakim|\bybu\b/.test(value)) return 1000;
     return 100;
   }
@@ -6402,17 +6402,9 @@ ${consults || "-"}
   }
 
   function aoeEffectiveClinicOrder() {
-    const defaults = aoeDefaultClinicOrder();
-    const byKey = new Map(defaults.map((name) => [norm(name), name]));
-    const ordered = [];
-    aoeSavedClinicOrder().forEach((name) => {
-      const actual = byKey.get(norm(name));
-      if (actual && !ordered.some((x) => norm(x) === norm(actual))) ordered.push(actual);
-    });
-    defaults.forEach((name) => {
-      if (!ordered.some((x) => norm(x) === norm(name))) ordered.push(name);
-    });
-    return ordered;
+    // Klinik sırası sabittir: GC 2, GC 1, Gastro/Onkolojik, GC 3, GC 4,
+    // diğer klinikler ve en sonda yoğun bakım. Eski yerel özel sıra bunu bozamaz.
+    return aoeDefaultClinicOrder();
   }
 
   function aoeConfigureClinicOrder() {

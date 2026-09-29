@@ -46,7 +46,8 @@ Google Docs seçeneği biçimi koruyan DOCX dosyasını indirir ve Google Drive'
 - Görüntülemeler son 45 günle sınırlandırılır; abdomen USG yanında hepatobilier USG de ayrıntılı gösterilir.
 - Ayrıntılı Görüntüleme bölümünde alt/üst/tüm abdomen BT, toraks BT, abdomen USG, MRCP, ERCP, EUS ve PTK gösterilir.
 - BT raporlarında `SONUÇ:` başlığından önceki metin; ERCP ve EUS raporlarında yalnızca `SONUÇ:` bölümü yazılır.
-- Takip bölümünde yalnızca yatış tarihinden sonraki kayıtlar bulunur; konsültasyonlar `01.10 Kardiyoloji kons` biçiminde yalnız bölüm adıyla gösterilir.
+- Takip bölümünde yalnızca yatış tarihinden sonraki kayıtlar ve en son klinik izlem bulunur; konsültasyonlar `01.10 Kardiyoloji kons` biçiminde yalnız bölüm adıyla gösterilir.
+- `Görüntüleme eşliğinde karaciğer lezyon biopsi işlemi` dahil biyopsi kayıtları Takip'te kısaca `Biyopsi` olarak gösterilir.
 - EKG, PAAG, ADBG, BT, ERCP, PTK ve diğer tüm son 45 günlük görüntülemeler Takip'te yalnızca ad olarak listelenir.
 - Eski DOCX'te olup güncel FONET hasta listesinde olmayan hastalar belgenin en sonunda `KONTROL` başlığı altında kırmızı korunur.
 - Order başlangıcı, mevcut yatış tarihinden sonra aynı ilacın ilk kez order edildiği tarih olarak gösterilir.

@@ -3485,6 +3485,34 @@ ${consults || "-"}
     if (!p.birimSevkId) return;
     const data = await apiJson(`/Tibbi/HastaBirimSevk/getSevkUyariInfo/${p.birimSevkId}`);
     parseSevkInfo(data, p);
+    await fetchAdmissionHistory(p);
+  }
+
+  async function fetchAdmissionHistory(p) {
+    if (!p.hastaGelisId) return;
+    try {
+      const data = await apiJson("/Tibbi/HastaBirimSevk/getKayitList", {
+        filterMap:"",
+        filter:JSON.stringify([{
+          index:1, property:"hastaGelis.id", value:Number(p.hastaGelisId),
+          filterType:"kriterPanel", type:"Long", operator:"="
+        }]),
+        page:1, start:0, limit:500,
+        sort:JSON.stringify([{ property:"sevkTarihi", direction:"ASC" }])
+      });
+      const rows = Array.isArray(data.data) ? data.data : [];
+      const dates = rows.map((row) =>
+        row.sevkTarihi || row.yatisTarihi || row.kabulTarihi || row.baslangicTarihi || ""
+      ).filter((value) => parseTrDate(value));
+      if (dates.length) {
+        dates.sort((a, b) => parseTrDate(a) - parseTrDate(b));
+        p.yatis = dates[0];
+        p.admissionHistory = rows;
+      }
+    } catch (e) {
+      p.errors = p.errors || [];
+      p.errors.push(`Yatış hareketleri: ${e.message}`);
+    }
   }
 
   async function fetchClinical(p) {
@@ -3726,8 +3754,8 @@ ${consults || "-"}
           { index:1, property:"tarihTuru", value:"tarihAraligiIcinde", filterType:"kriterPanel", isEnum:false, type:"String", operator:"=" },
           { index:2, property:"tarih", value:`${admissionDate} 00:00:00`, filterType:"kriterPanel", type:"date", operator:"=" },
           { index:3, property:"e.baslangicTarihi", value:`${admissionDate} 00:00:00`, filterType:"kriterPanel", type:"date", operator:">=" },
-          { index:4, property:"e.bitisTarihi", value:end, filterType:"kriterPanel", type:"date", operator:"<=" },
-          { index:5, property:"birimSevk.id", value:Number(p.birimSevkId), filterType:"kriterPanel", type:"Long", operator:"=" },
+          { index:4, property:"e.baslangicTarihi", value:end, filterType:"kriterPanel", type:"date", operator:"<=" },
+          { index:5, property:p.hastaGelisId ? "birimSevk.hastaGelis.id" : "birimSevk.id", value:Number(p.hastaGelisId || p.birimSevkId), filterType:"kriterPanel", type:"Long", operator:"=" },
           { index:6, property:"yeri", value:2, filterType:"kriterPanel", isEnum:true, type:"tr.com.fonet.hbys.common.enums.EOrderYeri", operator:"=" },
           { index:7, property:"hemsireOrder", value:"false", filterType:"kriterPanel", isEnum:false, type:"String", operator:"=" }
         ];
@@ -5982,6 +6010,7 @@ ${consults || "-"}
       .trim();
     if (!value) return false;
     if (/\b(mrcp|ercp|eus|ptk)\b/.test(value) ||
+        /\b(ozefagoskopi|ozofagoskopi|kolonoskopi)\b/.test(value) ||
         /endoskopik\s+(retrograd|ultrason)/.test(value) ||
         /mr\s+kolanji/.test(value) || /perkutan\s+transhepatik/.test(value)) return true;
     const isBt = /\bbt\b/.test(value);
@@ -6022,10 +6051,7 @@ ${consults || "-"}
   }
 
   function aoeConsultAnswerExcerpt(value) {
-    const text = cleanMultiline(value || "");
-    if (!text) return "";
-    const marker = /(?:^|[\s\n\r])(ÖNERİLER|ONERILER|ÖNERİ|ONERI|SONUÇ|SONUC)\s*[:\-]?\s*/i.exec(text);
-    return marker ? cleanMultiline(text.slice(marker.index).replace(/^\s+/, "")) : text;
+    return cleanMultiline(value || "");
   }
 
   function aoeDrugName(value) {
@@ -6281,7 +6307,7 @@ ${consults || "-"}
       if (blood) add(4, blood, item.date);
     });
     return aoeCollapseErcpBundle(events)
-      .sort((a, b) => a.group - b.group || (parseTrDate(b.date) || 0) - (parseTrDate(a.date) || 0));
+      .sort((a, b) => (parseTrDate(a.date) || 0) - (parseTrDate(b.date) || 0) || a.group - b.group);
   }
 
   function aoeFollowEventLine(event) {
@@ -6352,6 +6378,7 @@ ${consults || "-"}
           if (Object.prototype.hasOwnProperty.call(saved, field)) locked[field] = clean(saved[field] || "");
         });
         const merged = { ...live, ...locked };
+        if (live.admission) merged.admission = live.admission;
         merged.bh = aoeSanitizeKnownDiseases(merged.bh, p);
         return merged;
       }

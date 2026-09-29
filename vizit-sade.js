@@ -1,6 +1,8 @@
 (() => {
   /********************************************************************
-   * VİZİT SADE V1.8 KLİNİK PANEL
+   * VİZİT SADE V1.9 KLİNİK PANEL
+   * - V1.9: yatış sonrası tek son klinik izlem, konsültasyon/biopsi takibi,
+   *   ilk order tarihi, hepatobilier USG, sabit klinik sırası ve KONTROL grubu.
    * - V1.8: son 31 gündeki gerçek ameliyat servis yatışından önce olsa da POSTOP sayılır.
    * - V1.7: ERCP işlem paketi tek Takip satırı; punto ve PREOP/POSTOP rejim biçimi güncellendi.
    * - V1.6: BH alanında negatif/generic rapor metinlerinden yanlış CA üretimi engellendi.

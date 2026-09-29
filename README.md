@@ -1,5 +1,7 @@
 # Vizit Sade
 
+Güncel sürüm: **V1.9**
+
 Fonet Canlı Vizit'in çalışan hasta toplama ve ayrıntı çekme altyapısını temel alan; yoğun servis vizitine uygun kompakt klinik panel ve toplu Word/Google Docs çıktısı sunan bağımsız tarayıcı betiği.
 
 ## Güvenli kullanım

@@ -1,4 +1,5 @@
 (() => {
+  const APP_VERSION = "1.9";
   /********************************************************************
    * VİZİT SADE V1.9 KLİNİK PANEL
    * - V1.9: yatış sonrası tek son klinik izlem, konsültasyon/biopsi takibi,
@@ -62,6 +63,7 @@
   }
 
   const state = {
+    version: APP_VERSION,
     patients: [],
     requests: [],
     seen: {},
@@ -5711,7 +5713,7 @@ ${consults || "-"}
       </style>
       <header id="fsl-drag-handle" class="vs-header" style="display:grid;grid-template-columns:minmax(210px,.7fr) minmax(280px,1.2fr) auto;align-items:center;gap:10px;padding:7px 9px;background:${t.header};color:${t.headerText};cursor:${state.popupMode ? "default" : "move"};user-select:none;border-bottom:1px solid ${t.border};">
         <div style="min-width:0;">
-          <b style="font-size:14px;">FONET Servis Canlı Paneli · VİZİT SADE V1.8</b>
+          <b style="font-size:14px;">FONET Servis Canlı Paneli · VİZİT SADE V${APP_VERSION}</b>
           <div style="font-size:10px;color:#bfdbfe;margin-top:2px;"><span id="fsl-status">hazır</span> · Son güncelleme <span id="fsl-last-updated">--:--</span></div>
         </div>
         <div class="vs-header-mid" style="display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;border:1px solid ${t.border};border-radius:7px;background:${t.surface};overflow:hidden;min-width:0;">

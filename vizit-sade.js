@@ -6307,7 +6307,7 @@ ${consults || "-"}
       if (blood) add(4, blood, item.date);
     });
     return aoeCollapseErcpBundle(events)
-      .sort((a, b) => (parseTrDate(a.date) || 0) - (parseTrDate(b.date) || 0) || a.group - b.group);
+      .sort((a, b) => (parseTrDate(b.date) || 0) - (parseTrDate(a.date) || 0) || a.group - b.group);
   }
 
   function aoeFollowEventLine(event) {
@@ -6408,7 +6408,7 @@ ${consults || "-"}
 
   function aoeClinicName(p) {
     const raw = clean(p.birim || p.servis || p.klinik || "DİĞER KLİNİKLER");
-    return /gastroenteroloji(?:k)?\s*cerrahi|onkolojik\s*cerrahi/i.test(raw)
+    return /gastroenteroloji(?:k)?\s*cerrahi|onkolojik\s*cerrahi|cerrahi\s*onkoloji/i.test(raw)
       ? "GASTROENTEROLOJİK VE ONKOLOJİK CERRAHİ" : raw;
   }
 
@@ -6422,7 +6422,7 @@ ${consults || "-"}
       const no = Number(value.match(/(?:kliniği|klinigi|servisi|servis)?\s*([1-4])\b/)?.[1] || value.match(/\b([1-4])\b/)?.[1] || 0);
       return ({ 2:0, 1:1, 3:3, 4:4 })[no] ?? 5;
     }
-    if (/gastroenteroloji(?:k)?.*onkolojik|gastroenteroloji(?:k)?\s*cerrahi|onkolojik\s*cerrahi/.test(value)) return 2;
+    if (/gastroenteroloji(?:k)?.*onkolojik|gastroenteroloji(?:k)?\s*cerrahi|onkolojik\s*cerrahi|cerrahi\s*onkoloji/.test(value)) return 2;
     if (/yoğun\s*bakım|yogun\s*bakim|\bybu\b/.test(value)) return 1000;
     return 100;
   }
@@ -6825,6 +6825,25 @@ ${consults || "-"}
     });
   }
 
+  function aoeWordPreviousSummary(previous) {
+    const name = clean(previous?.name || "ESKİ HASTA");
+    const lines = [
+      aoeWordParagraph(name, { size:15, bold:true, keep:true }),
+      aoeWordParagraph("", { size:9 }),
+      aoeWordParagraph("TANI: " + (clean(previous?.diagnosis || "") || "—"), { size:11, bold:true }),
+      aoeWordParagraph("OP: " + (clean(previous?.operation || "") || "—"), { size:11, bold:true }),
+      aoeWordParagraph("PLAN: " + (clean(previous?.plan || "") || "—"), { size:11, bold:true }),
+      aoeWordParagraph("Yatış Tarihi: " + (clean(previous?.admission || "") || "—"), { size:10, bold:true }),
+      aoeWordParagraph("Op Tarihi: " + (clean(previous?.surgeryDate || "") || "—"), { size:10, bold:true }),
+      aoeWordParagraph("BH: " + (clean(previous?.bh || "") || "—"), { size:9 }),
+      aoeWordParagraph("Kİ: " + (clean(previous?.ki || "") || "—"), { size:9 }),
+      aoeWordParagraph("GO: " + (clean(previous?.go || "") || "—"), { size:9 }),
+      aoeWordParagraph("Dünkü dosyada bulundu; güncel FONET listesinde yok.", { size:9, bold:true }),
+      aoeWordParagraph("-----------------------------------------------------", { size:9 })
+    ];
+    return aoeWordXmlColor(lines.join(""));
+  }
+
   function aoeDocxBytes() {
     const sortedPatients = aoeSortedPatients();
     const previousPatients = state.aoePreviousWordPatients || [];
@@ -6839,6 +6858,23 @@ ${consults || "-"}
         entries.push({ patient, clinic:aoeClinicName(patient), room:clean(patient.oda || ""), previousIndex, missing:false });
         used.add(matchIndex);
       } else entries.push({ previous, clinic:"KONTROL", room:clean(previous.room || ""), previousIndex, missing:true });
+    });
+    (state.aoePreviousPatients || []).forEach((previous, fallbackIndex) => {
+      const existsInCurrent = sortedPatients.some((patient) => aoePreviousMatchesPatient(previous, patient));
+      const existsAsWordBlock = previousPatients.some((wordPatient) => aoePreviousMatchesPatient(wordPatient, {
+        adSoyad:previous.name || "",
+        oda:previous.room || "",
+        hastaId:"",
+        protokol:""
+      }));
+      if (!existsInCurrent && !existsAsWordBlock) entries.push({
+        previous,
+        clinic:"KONTROL",
+        room:clean(previous.room || ""),
+        previousIndex:previousPatients.length + fallbackIndex,
+        missing:true,
+        summary:true
+      });
     });
     sortedPatients.forEach((patient, index) => {
       if (used.has(index)) return;
@@ -6866,7 +6902,9 @@ ${consults || "-"}
         { size:12, bold:true, align:"center", before:80, after:120, keep:true }
       );
       lastClinic = key;
-      orderedPatients += entry.missing ? aoeWordXmlColor(entry.previous.xml) : aoeWordPatient(entry.patient);
+      orderedPatients += entry.missing
+        ? (entry.summary ? aoeWordPreviousSummary(entry.previous) : aoeWordXmlColor(entry.previous.xml))
+        : aoeWordPatient(entry.patient);
     });
     const body = aoeWordParagraph("VİZİT SADE", { size:17, bold:true, after:120 }) + orderedPatients;
     const documentXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +

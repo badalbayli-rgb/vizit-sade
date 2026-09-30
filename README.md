@@ -54,7 +54,7 @@ Google Docs seçeneği biçimi koruyan DOCX dosyasını indirir ve Google Drive'
 - BT raporlarında `SONUÇ:` başlığından önceki metin; ERCP ve EUS raporlarında yalnızca `SONUÇ:` bölümü yazılır.
 - Takip bölümünde yalnızca yatış tarihinden sonraki kayıtlar ve en son klinik izlem bulunur; bütün satırlar en güncel tarih en üstte olacak şekilde sıralanır ve konsültasyonlar `01.10 Kardiyoloji kons` biçiminde yalnız bölüm adıyla gösterilir.
 - Gastroenterolojik Cerrahi ile Cerrahi Onkoloji tek başlıkta birleştirilir ve hastalar oda numarasına göre sıralanır.
-- Dünkü DOCX'te olup güncel FONET listesinde bulunmayan hastalar, eski dosyanın biçimi tam ayrıştırılamasa bile çıktının sonundaki `KONTROL` başlığında korunur.
+- Dünkü DOCX'te olup güncel FONET listesinde bulunmayan hastalar, özgün hasta blokları değiştirilmeden çıktının sonundaki `KONTROL` başlığında kırmızı korunur; satıra bölünmüş hasta başlıkları da tanınır.
 - `Görüntüleme eşliğinde karaciğer lezyon biopsi işlemi` dahil biyopsi kayıtları Takip'te kısaca `Biyopsi` olarak gösterilir.
 - EKG, PAAG, ADBG, BT, ERCP, PTK ve diğer tüm son 45 günlük görüntülemeler Takip'te yalnızca ad olarak listelenir.
 - Eski DOCX'te olup güncel FONET hasta listesinde olmayan hastalar belgenin en sonunda `KONTROL` başlığı altında kırmızı korunur.

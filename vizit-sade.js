@@ -6825,25 +6825,6 @@ ${consults || "-"}
     });
   }
 
-  function aoeWordPreviousSummary(previous) {
-    const name = clean(previous?.name || "ESKİ HASTA");
-    const lines = [
-      aoeWordParagraph(name, { size:15, bold:true, keep:true }),
-      aoeWordParagraph("", { size:9 }),
-      aoeWordParagraph("TANI: " + (clean(previous?.diagnosis || "") || "—"), { size:11, bold:true }),
-      aoeWordParagraph("OP: " + (clean(previous?.operation || "") || "—"), { size:11, bold:true }),
-      aoeWordParagraph("PLAN: " + (clean(previous?.plan || "") || "—"), { size:11, bold:true }),
-      aoeWordParagraph("Yatış Tarihi: " + (clean(previous?.admission || "") || "—"), { size:10, bold:true }),
-      aoeWordParagraph("Op Tarihi: " + (clean(previous?.surgeryDate || "") || "—"), { size:10, bold:true }),
-      aoeWordParagraph("BH: " + (clean(previous?.bh || "") || "—"), { size:9 }),
-      aoeWordParagraph("Kİ: " + (clean(previous?.ki || "") || "—"), { size:9 }),
-      aoeWordParagraph("GO: " + (clean(previous?.go || "") || "—"), { size:9 }),
-      aoeWordParagraph("Dünkü dosyada bulundu; güncel FONET listesinde yok.", { size:9, bold:true }),
-      aoeWordParagraph("-----------------------------------------------------", { size:9 })
-    ];
-    return aoeWordXmlColor(lines.join(""));
-  }
-
   function aoeDocxBytes() {
     const sortedPatients = aoeSortedPatients();
     const previousPatients = state.aoePreviousWordPatients || [];
@@ -6858,23 +6839,6 @@ ${consults || "-"}
         entries.push({ patient, clinic:aoeClinicName(patient), room:clean(patient.oda || ""), previousIndex, missing:false });
         used.add(matchIndex);
       } else entries.push({ previous, clinic:"KONTROL", room:clean(previous.room || ""), previousIndex, missing:true });
-    });
-    (state.aoePreviousPatients || []).forEach((previous, fallbackIndex) => {
-      const existsInCurrent = sortedPatients.some((patient) => aoePreviousMatchesPatient(previous, patient));
-      const existsAsWordBlock = previousPatients.some((wordPatient) => aoePreviousMatchesPatient(wordPatient, {
-        adSoyad:previous.name || "",
-        oda:previous.room || "",
-        hastaId:"",
-        protokol:""
-      }));
-      if (!existsInCurrent && !existsAsWordBlock) entries.push({
-        previous,
-        clinic:"KONTROL",
-        room:clean(previous.room || ""),
-        previousIndex:previousPatients.length + fallbackIndex,
-        missing:true,
-        summary:true
-      });
     });
     sortedPatients.forEach((patient, index) => {
       if (used.has(index)) return;
@@ -6902,9 +6866,7 @@ ${consults || "-"}
         { size:12, bold:true, align:"center", before:80, after:120, keep:true }
       );
       lastClinic = key;
-      orderedPatients += entry.missing
-        ? (entry.summary ? aoeWordPreviousSummary(entry.previous) : aoeWordXmlColor(entry.previous.xml))
-        : aoeWordPatient(entry.patient);
+      orderedPatients += entry.missing ? aoeWordXmlColor(entry.previous.xml) : aoeWordPatient(entry.patient);
     });
     const body = aoeWordParagraph("VİZİT SADE", { size:17, bold:true, after:120 }) + orderedPatients;
     const documentXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
@@ -6969,7 +6931,8 @@ ${consults || "-"}
 
   function aoeIsPatientTitleText(text) {
     const parts = clean(text).split("-").map(clean).filter(Boolean);
-    return parts.length >= 4 && /^\d{1,3}[EK]?$/.test(parts[parts.length - 1] || "");
+    if (parts.length < 4 || !/^\d{1,3}[EK]?$/.test(parts[parts.length - 1] || "")) return false;
+    return /^[A-ZÇĞİÖŞÜ]{1,6}$/i.test(parts[0] || "") && /\d/.test(parts[1] || "");
   }
 
   function aoeCombinedPatientTitle(first, second) {
@@ -7003,10 +6966,7 @@ ${consults || "-"}
         const previousField = previous?.text.match(/^(TANI|OP|BH|K[İI]|GO)\s*:/i)?.[1] || "";
         const startsAnotherField = /^[^:]{1,24}:/.test(line);
         if (previousField && !startsAnotherField && !aoeIsPatientTitleText(line)) previous.text = clean(previous.text + " " + line);
-        else grouped.push({
-          text:line,
-          isPatientTitle:aoeIsPatientTitleText(line) || (sizes.includes("30") && (line.match(/-/g) || []).length >= 2)
-        });
+        else grouped.push({ text:line, isPatientTitle:aoeIsPatientTitleText(line) });
       });
       return grouped;
     });
@@ -7091,6 +7051,18 @@ ${consults || "-"}
     return parts.length >= 4 ? clean(parts[1]) : "";
   }
 
+  function aoePatientTitleFromBlockInfo(info) {
+    const lines = (info?.lines || []).map(clean).filter(Boolean);
+    const exact = lines.find((line) => aoeIsPatientTitleText(line));
+    if (exact) return exact;
+    for (let index = 0; index < lines.length - 1; index += 1) {
+      const joined = aoeCombinedPatientTitle(lines[index], lines[index + 1]);
+      if (joined) return joined;
+    }
+    const allLines = clean(lines.join(" "));
+    return aoeIsPatientTitleText(allLines) ? allLines : "";
+  }
+
   function aoePreviousWordPatients(documentXml) {
     const body = String(documentXml || "").match(/<w:body[^>]*>([\s\S]*?)<\/w:body>/)?.[1] || "";
     const blocks = body.match(/<w:p\b[\s\S]*?<\/w:p>|<w:tbl\b[\s\S]*?<\/w:tbl>/g) || [];
@@ -7110,12 +7082,12 @@ ${consults || "-"}
     for (let index = 0; index < blocks.length; index += 1) {
       const block = blocks[index];
       const info = infos[index];
-      const titleLine = (info.lines || []).find((line) => aoeIsPatientTitleText(line)) || info.text;
-      const nextTitleLine = (infos[index + 1]?.lines || []).find((line) => aoeIsPatientTitleText(line)) || infos[index + 1]?.text;
+      const titleLine = aoePatientTitleFromBlockInfo(info) || info.text;
+      const nextTitleLine = aoePatientTitleFromBlockInfo(infos[index + 1]) || infos[index + 1]?.text;
       const joinedTitle = !aoeIsPatientTitleText(titleLine) && /^[^-]+-\d+-/.test(titleLine)
         ? aoeCombinedPatientTitle(titleLine, nextTitleLine)
         : "";
-      const isPatientTitle = (aoeIsPatientTitleText(titleLine) || (info.sizes.includes("30") && aoeIsPatientTitleText(titleLine))) && titleLine !== "VİZİT SADE";
+      const isPatientTitle = aoeIsPatientTitleText(titleLine) && titleLine !== "VİZİT SADE";
       const isClinicHeading = info.sizes.includes("24") && info.centered && info.text;
       if (joinedTitle) {
         finish();

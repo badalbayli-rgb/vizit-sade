@@ -61,6 +61,7 @@ Google Docs seçeneği biçimi koruyan DOCX dosyasını indirir ve Google Drive'
 - Eski DOCX'te olup güncel FONET hasta listesinde olmayan hastalar belgenin en sonunda `KONTROL` başlığı altında kırmızı korunur.
 - Order başlangıcı, günlük yeniden giriş tarihi yerine kesintisiz yatış sürecindeki bütün servis/yoğun bakım sevkleri taranarak aynı ilacın ilk kez order edildiği tarih olarak gösterilir.
 - Yatış tarihi, taburculuk olmadan servis/yoğun bakım arasında yapılan nakillerde ilk yatış tarihidir; hasta yoğun bakımdan doğrudan servise geldiyse farklı hasta gelişi açılmış olsa bile yoğun bakım kabul tarihi kullanılır.
+- CA 19-9, CA 125, CA 15-3, CA 72-4, CEA, AFP, PSA, NSE ve diğer desteklenen tümör belirteçlerinin hasta geçmişindeki en güncel değerleri, yeni sonuç çalışılmayan günlerde de Vital satırının altında sabit gösterilir.
 - Eski DOCX'ten eşleşen hastaların sabit alanları kilitli kalır. Yeni hastaların tanısında en son yanıtlanan Genel Cerrahi konsültasyonu, yoksa FONET tanı listesi kullanılır.
 - BH alanına `CA` yalnızca doğrulanmış kanser ifadesi varsa eklenir; "malignite/tümör izlenmedi" ve kalsiyum gibi kullanımlar CA sayılmaz.
 - Aynı tarihteki dört ERCP işlem kalemi Takip'te tek `19.08 ERCP` satırına birleştirilir.

@@ -2088,6 +2088,18 @@
   function normalizeLabName(name) {
     const s = clean(name);
     const n = s.toLocaleLowerCase("tr-TR");
+    if (/ca\s*19\s*[-.]?\s*9|karbonhidrat\s*antijen.*19/i.test(n)) return "CA199";
+    if (/ca\s*125|kanser\s*antijen.*125/i.test(n)) return "CA125";
+    if (/ca\s*15\s*[-.]?\s*3|kanser\s*antijen.*15/i.test(n)) return "CA153";
+    if (/ca\s*72\s*[-.]?\s*4|kanser\s*antijen.*72/i.test(n)) return "CA724";
+    if (/serbest\s*psa|free\s*psa/i.test(n)) return "fPSA";
+    if (/total\s*psa|total\s*prostat|prostat\s*spesifik\s*antijen|^psa$/i.test(n)) return "PSA";
+    if (/karsinoembriyonik|carcinoembryonic|^cea$/i.test(n)) return "CEA";
+    if (/alfa\s*fetoprotein|alpha\s*fetoprotein|^afp$/i.test(n)) return "AFP";
+    if (/n[öo]ron\s*spesifik\s*enolaz|neuron\s*specific\s*enolase|^nse$/i.test(n)) return "NSE";
+    if (/cyfra\s*21\s*[-.]?\s*1/i.test(n)) return "CYFRA211";
+    if (/skuam[oö]z.*h[üu]cre.*antijen|squamous.*cell.*antigen|^scc$/i.test(n)) return "SCC";
+    if (/kromogranin\s*a|chromogranin\s*a/i.test(n)) return "CgA";
     if (/^wbc$/i.test(s) || /lökosit|lokosit|leukocyte|leucocyte/i.test(n)) return "WBC";
     if (/^hgb$/i.test(s) || /^hb$/i.test(s) || /hemoglobin/i.test(n)) return "Hb";
     if (/^plt$/i.test(s) || /trombosit/i.test(n)) return "PLT";
@@ -2365,6 +2377,20 @@
     PCT: "PCT"
   };
 
+  const TUMOR_MARKER_KEYS = ["CA199", "CA125", "CA153", "CA724", "CEA", "AFP", "PSA", "fPSA", "NSE", "CYFRA211", "SCC", "CgA"];
+  const TUMOR_MARKER_LABELS = {
+    CA199:"CA19-9", CA125:"CA125", CA153:"CA15-3", CA724:"CA72-4",
+    CEA:"CEA", AFP:"AFP", PSA:"PSA", fPSA:"sPSA", NSE:"NSE",
+    CYFRA211:"CYFRA21-1", SCC:"SCC", CgA:"CgA"
+  };
+
+  function latestTumorMarkerText(labs = {}) {
+    return TUMOR_MARKER_KEYS.map((key) => {
+      const item = (labs?.[key] || [])[0];
+      return item?.value ? `${TUMOR_MARKER_LABELS[key] || key}:${item.value}` : "";
+    }).filter(Boolean).join(" ");
+  }
+
   const LAB_NORMAL_RANGES = {
     WBC: [4, 10.5],
     Hb: [12, 17.5],
@@ -2455,7 +2481,13 @@
 
   function visitLabTableText(labs = {}, vitalLine = "") {
     const dates = labVisitDates(labs, 8);
-    if (!dates.length) return vitalLine ? ["Tetkik\tSon", `Son Vital\t${vitalLine}`].join("\n") : "Lab: -";
+    const tumorMarkers = latestTumorMarkerText(labs);
+    if (!dates.length) {
+      const rows = ["Tetkik\tSon"];
+      if (vitalLine) rows.push(`Son Vital\t${vitalLine}`);
+      if (tumorMarkers) rows.push(`Tümör\t${tumorMarkers}`);
+      return rows.length > 1 ? rows.join("\n") : "Lab: -";
+    }
     const header = ["Tetkik", ...dates.map((d) => d.label)].join("\t");
     const rows = VISIT_LAB_ROWS.map((key) => {
       const cells = dates.map((d) => {
@@ -2466,6 +2498,7 @@
     });
     rows.push(["Elekt", latestElectrolyteText(labs), ...dates.slice(1).map(() => "")].join("\t"));
     if (vitalLine) rows.push(["Son Vital", vitalLine, ...dates.slice(1).map(() => "")].join("\t"));
+    if (tumorMarkers) rows.push(["Tümör", tumorMarkers, ...dates.slice(1).map(() => "")].join("\t"));
     return [header, ...rows].join("\n");
   }
 
@@ -2487,7 +2520,8 @@
       `Glu:${labSeries(labs, "Glu", max) || "-"}`,
       `Elekt:${latestElectrolyteText(labs)}`,
       `amilaz-lipaz:${pairLabSeries(labs, "Amilaz", "Lipaz", max) || "-"}`,
-      `Vital:${vitalLine || "-"}`
+      `Vital:${vitalLine || "-"}`,
+      `Tümör:${latestTumorMarkerText(labs) || "-"}`
     ];
     return rows.join("\n");
   }
@@ -2504,14 +2538,15 @@
 
   function visitLabTableHtml(labs = {}, vitalLine = "") {
     const dates = labVisitDates(labs, 8);
+    const tumorMarkers = latestTumorMarkerText(labs);
     const tableStyle = "border-collapse:collapse;font-family:Arial Narrow,Arial,sans-serif;font-size:7.8pt;line-height:1.15;table-layout:fixed;width:100%;";
     const thStyle = "text-align:center;font-weight:bold;padding:1.2px 2.4px;border:1px solid #d9dee6;white-space:nowrap;";
     const firstThStyle = "text-align:left;font-weight:bold;padding:1.2px 2.4px;border:1px solid #d9dee6;white-space:nowrap;width:41pt;";
     const tdStyle = "text-align:center;padding:1.2px 2.4px;border:1px solid #e5e7eb;vertical-align:middle;white-space:nowrap;";
     const firstTdStyle = "text-align:left;padding:1.2px 2.4px;border:1px solid #e5e7eb;vertical-align:middle;white-space:nowrap;font-weight:bold;width:41pt;";
     if (!dates.length) {
-      return vitalLine
-        ? `<table style="${tableStyle}"><thead><tr><th style="${firstThStyle}">Tetkik</th><th style="${thStyle}">Son</th></tr></thead><tbody><tr><td style="${firstTdStyle}"><strong>Vital</strong></td><td style="${tdStyle}">${escapeHtml(vitalLine)}</td></tr></tbody></table>`
+      return vitalLine || tumorMarkers
+        ? `<table style="${tableStyle}"><thead><tr><th style="${firstThStyle}">Tetkik</th><th style="${thStyle}">Son</th></tr></thead><tbody>${vitalLine ? `<tr><td style="${firstTdStyle}"><strong>Vital</strong></td><td style="${tdStyle}">${escapeHtml(vitalLine)}</td></tr>` : ""}${tumorMarkers ? `<tr><td style="${firstTdStyle}"><strong>Tümör</strong></td><td style="${tdStyle}">${escapeHtml(tumorMarkers)}</td></tr>` : ""}</tbody></table>`
         : `<p>Lab: -</p>`;
     }
     const header = [`<th style="${firstThStyle}">Tetkik</th>`, ...dates.map((d) => `<th style="${thStyle}">${escapeHtml(d.label)}</th>`)].join("");
@@ -2523,7 +2558,8 @@
       return `<tr><td style="${firstTdStyle}">${escapeHtml(VISIT_LAB_LABELS[key] || key)}</td>${cells}</tr>`;
     }).join("")
       + `<tr><td style="${firstTdStyle}"><strong>Elekt</strong></td><td style="${tdStyle};text-align:left;" colspan="${Math.max(1, dates.length)}">${escapeHtml(latestElectrolyteText(labs))}</td></tr>`
-      + (vitalLine ? `<tr><td style="${firstTdStyle}"><strong>Vital</strong></td><td style="${tdStyle};text-align:left;" colspan="${Math.max(1, dates.length)}">${escapeHtml(vitalLine)}</td></tr>` : "");
+      + (vitalLine ? `<tr><td style="${firstTdStyle}"><strong>Vital</strong></td><td style="${tdStyle};text-align:left;" colspan="${Math.max(1, dates.length)}">${escapeHtml(vitalLine)}</td></tr>` : "")
+      + (tumorMarkers ? `<tr><td style="${firstTdStyle}"><strong>Tümör</strong></td><td style="${tdStyle};text-align:left;" colspan="${Math.max(1, dates.length)}">${escapeHtml(tumorMarkers)}</td></tr>` : "");
     return `
       <table style="${tableStyle}">
         <thead><tr>${header}</tr></thead>
@@ -3509,28 +3545,47 @@ ${consults || "-"}
       );
       if (p.hastaId && rows.length) {
         try {
-          const allData = await apiJson("/Tibbi/HastaBirimSevk/getKayitList", {
-            filterMap:"",
-            filter:JSON.stringify([{
-              index:1, property:"hastaGelis.hasta.id", value:Number(p.hastaId),
-              filterType:"kriterPanel", type:"Long", operator:"="
-            }]),
-            page:1, start:0, limit:500,
-            sort:JSON.stringify([{ property:"sevkTarihi", direction:"DESC" }])
-          });
-          const allRows = Array.isArray(allData.data) ? allData.data : [];
+          const allRows = [];
+          for (const property of ["hastaGelis.hasta.id", "hasta.id", "birimSevk.hastaGelis.hasta.id"]) {
+            try {
+              const allData = await apiJson("/Tibbi/HastaBirimSevk/getKayitList", {
+                filterMap:"",
+                filter:JSON.stringify([{
+                  index:1, property, value:Number(p.hastaId),
+                  filterType:"kriterPanel", type:"Long", operator:"="
+                }]),
+                page:1, start:0, limit:1000,
+                sort:JSON.stringify([{ property:"sevkTarihi", direction:"DESC" }])
+              });
+              if (Array.isArray(allData.data)) allRows.push(...allData.data);
+            } catch (e) { /* Kurulumdaki geçerli hasta alanı denenmeye devam edilsin. */ }
+          }
           const firstCurrentStamp = Math.min(...rows.map((row) => parseTrDate(rowStart(row))).filter(Boolean));
-          const previous = Number.isFinite(firstCurrentStamp) ? allRows
+          const uniqueRows = allRows.filter((row, index, all) => {
+            const identity = clean(row.id || row.birimSevkId || row.hastaBirimSevkId) ||
+              [clean(rowStart(row)), norm(rowUnit(row))].join("|");
+            return all.findIndex((candidate) => {
+              const candidateIdentity = clean(candidate.id || candidate.birimSevkId || candidate.hastaBirimSevkId) ||
+                [clean(rowStart(candidate)), norm(rowUnit(candidate))].join("|");
+              return candidateIdentity === identity;
+            }) === index;
+          });
+          const previousCandidates = Number.isFinite(firstCurrentStamp) ? uniqueRows
             .filter((row) => {
               const stamp = parseTrDate(rowStart(row));
               const sameVisit = clean(row.hastaGelis?.id || row.hastaGelisId) === clean(p.hastaGelisId);
               return stamp && stamp < firstCurrentStamp && !sameVisit;
             })
-            .sort((a, b) => parseTrDate(rowStart(b)) - parseTrDate(rowStart(a)))[0] : null;
-          if (previous && /yoğun\s*bakım|yogun\s*bakim|\bybu\b/i.test(rowUnit(previous))) {
+            .sort((a, b) => parseTrDate(rowStart(b)) - parseTrDate(rowStart(a))) : [];
+          const previous = previousCandidates.find((row) => {
+            if (!/yoğun\s*bakım|yogun\s*bakim|\bybu\b/i.test(rowUnit(row))) return false;
+            const endStamp = parseTrDate(rowEnd(row));
+            return !endStamp || Math.abs(firstCurrentStamp - endStamp) <= 2 * 86400000;
+          });
+          if (previous) {
             const previousEnd = parseTrDate(rowEnd(previous));
             const directlyTransferred = !previousEnd || Math.abs(firstCurrentStamp - previousEnd) <= 2 * 86400000;
-            const explicitlyDischarged = /taburcu|exitus|eve\s*çıkış|eve\s*cikis/i.test(clean(
+            const explicitlyDischarged = /exitus|ölüm|olum|eve\s*çıkış|eve\s*cikis/i.test(clean(
               previous.cikisSekli?.adi || previous.taburcuSekli?.adi || previous.durum?.adi || previous.aciklama || ""
             ));
             if (directlyTransferred && !explicitlyDischarged) rows = [previous, ...rows];
@@ -3785,19 +3840,27 @@ ${consults || "-"}
     let historyRows = p.orderRows;
     const admissionDate = aoeDate(p.yatis || p.admission || p.yatisTarihi || "");
     if (admissionDate) {
-      try {
-        const sevkIds = [...new Set([
-          ...(p.admissionHistory || []).map((row) => row.id || row.birimSevkId || row.hastaBirimSevkId),
-          p.birimSevkId
-        ].map((value) => Number(value)).filter(Number.isFinite))];
-        const collected = [];
-        for (const sevkId of sevkIds) {
+      const sevkIds = [...new Set([
+        ...(p.admissionHistory || []).map((row) => row.id || row.birimSevkId || row.hastaBirimSevkId),
+        p.birimSevkId
+      ].map((value) => Number(value)).filter(Number.isFinite))];
+      const historyScopes = [
+        ...sevkIds.map((value) => ({ property:"birimSevk.id", value })),
+        ...(p.hastaGelisId ? [
+          { property:"birimSevk.hastaGelis.id", value:Number(p.hastaGelisId) },
+          { property:"hastaGelisId", value:Number(p.hastaGelisId) }
+        ] : []),
+        ...(p.hastaId ? [{ property:"birimSevk.hastaGelis.hasta.id", value:Number(p.hastaId) }] : [])
+      ];
+      const collected = [];
+      for (const scope of historyScopes) {
+        try {
           const historyFilter = [
             { index:1, property:"tarihTuru", value:"tarihAraligiIcinde", filterType:"kriterPanel", isEnum:false, type:"String", operator:"=" },
             { index:2, property:"tarih", value:`${admissionDate} 00:00:00`, filterType:"kriterPanel", type:"date", operator:"=" },
             { index:3, property:"e.baslangicTarihi", value:`${admissionDate} 00:00:00`, filterType:"kriterPanel", type:"date", operator:">=" },
             { index:4, property:"e.baslangicTarihi", value:end, filterType:"kriterPanel", type:"date", operator:"<=" },
-            { index:5, property:"birimSevk.id", value:sevkId, filterType:"kriterPanel", type:"Long", operator:"=" },
+            { index:5, property:scope.property, value:scope.value, filterType:"kriterPanel", type:"Long", operator:"=" },
             { index:6, property:"yeri", value:2, filterType:"kriterPanel", isEnum:true, type:"tr.com.fonet.hbys.common.enums.EOrderYeri", operator:"=" },
             { index:7, property:"hemsireOrder", value:"false", filterType:"kriterPanel", isEnum:false, type:"String", operator:"=" }
           ];
@@ -3806,23 +3869,24 @@ ${consults || "-"}
             filterMap:"", filter:JSON.stringify(historyFilter), page:1, start:0, limit:1000
           });
           if (Array.isArray(historyData.data)) collected.push(...historyData.data);
-        }
-        if (collected.length) historyRows = collected.filter((row, index, all) => {
-          const identity = (item) => clean(item.id) || [
-            norm(orderRawName(item)), clean(item.baslangicTarihi), clean(item.birimSevk?.id || item.birimSevkId)
-          ].join("|");
-          return all.findIndex((candidate) => identity(candidate) === identity(row)) === index;
-        });
-      } catch (e) { /* Güncel orderler yine gösterilsin. */ }
+        } catch (e) { /* Diğer sevk/geliş kapsamları taranmaya devam edilsin. */ }
+      }
+      if (collected.length) historyRows = collected.filter((row, index, all) => {
+        const identity = (item) => clean(item.id) || [
+          norm(orderRawName(item)), clean(item.baslangicTarihi), clean(item.birimSevk?.id || item.birimSevkId)
+        ].join("|");
+        return all.findIndex((candidate) => identity(candidate) === identity(row)) === index;
+      });
     }
     p.orderHistoryRows = historyRows;
     const firstDateByOrder = new Map();
     historyRows.filter(isMedicineOrderRaw).forEach((row) => {
-      const key = norm(aoeDrugName(orderRawName(row)));
       const date = row.baslangicTarihi || row.istemTarihi || row.kayitTarihi || row.eklemeTarihi || row.tarih || "";
       const stamp = parseTrDate(date);
-      const old = firstDateByOrder.get(key);
-      if (stamp && (!old || stamp < old.stamp)) firstDateByOrder.set(key, { stamp, date });
+      orderHistoryKeys(row).forEach((key) => {
+        const old = firstDateByOrder.get(key);
+        if (stamp && (!old || stamp < old.stamp)) firstDateByOrder.set(key, { stamp, date });
+      });
     });
     p.orders = p.orderRows.filter(isMedicineOrderRaw).slice(0, 12).map((x) => ({
       id: x.id,
@@ -3831,7 +3895,8 @@ ${consults || "-"}
       amount: x.miktar || "",
       unit: orderRawUnit(x),
       usage: orderRawUsage(x),
-      start: firstDateByOrder.get(norm(aoeDrugName(orderRawName(x))))?.date || x.baslangicTarihi || "",
+      start: orderHistoryKeys(x).map((key) => firstDateByOrder.get(key)).filter(Boolean)
+        .sort((a, b) => a.stamp - b.stamp)[0]?.date || x.baslangicTarihi || "",
       status: x.durum,
       raw: x
     })).filter((x) => x.name);
@@ -3892,6 +3957,16 @@ ${consults || "-"}
 
   function orderRawUnit(x = {}) {
     return clean(x.birim?.adi || x.birimi || x.birimAdi || "");
+  }
+
+  function orderHistoryKeys(x = {}) {
+    const ids = [
+      x.stok?.id, x.stokId, x.malzeme?.id, x.malzemeId,
+      x.ilac?.id, x.ilacId, x.hizmetMakro?.id, x.hizmetMakroId
+    ].map((value) => clean(idValue(value))).filter(Boolean).map((value) => `id:${value}`);
+    const rawName = norm(orderRawName(x));
+    const shortName = norm(aoeDrugName(orderRawName(x)));
+    return [...new Set([...ids, rawName ? `ad:${rawName}` : "", shortName ? `kisa:${shortName}` : ""].filter(Boolean))];
   }
 
   function orderRawUsage(x = {}) {
@@ -4253,23 +4328,39 @@ ${consults || "-"}
       sort: JSON.stringify([{ property: "lisKabulTarihi", direction: "DESC" }])
     });
     if (!p.hastaGelisId && kabul.data?.[0]?.hastaGelisId) p.hastaGelisId = kabul.data[0].hastaGelisId;
-    const latest = (kabul.data || []).slice(0, 5);
+    let latest = (kabul.data || []).slice(0, 20);
+    if (p.hastaId) {
+      try {
+        const historyKabul = await apiJson("/Lis/LisRaporSonuc/getLisRaporHastaInfoList", {
+          filter: JSON.stringify([{ property:"hastaId", value:Number(p.hastaId), type:"Long", operator:"=" }]),
+          page:1, start:0, limit:60,
+          sort:JSON.stringify([{ property:"lisKabulTarihi", direction:"DESC" }])
+        });
+        latest = [...latest, ...(historyKabul.data || []).slice(0, 40)].filter((item, index, all) => {
+          const identity = clean(item.lisKabulId || item.id) || clean(item.lisKabulTarihi);
+          return all.findIndex((candidate) =>
+            (clean(candidate.lisKabulId || candidate.id) || clean(candidate.lisKabulTarihi)) === identity
+          ) === index;
+        });
+      } catch (e) { /* Güncel yatışın laboratuvarları yine kullanılabilir. */ }
+    }
     const barkods = [];
-    for (const k of latest) {
-      const tup = await apiJson("/Lis/LisRaporSonuc/getLisHastaTupInfo", {
+    for (let offset = 0; offset < latest.length; offset += 6) {
+      const batch = latest.slice(offset, offset + 6);
+      const tubeLists = await Promise.all(batch.map((k) => apiJson("/Lis/LisRaporSonuc/getLisHastaTupInfo", {
         filter: JSON.stringify([{ filterType: "kriterPanel", property: "t.lisKabul.id", value: Number(k.lisKabulId), type: "Long", operator: "=" }]),
         page: 1,
         start: 0,
         limit: 100
-      });
-      barkods.push(...(tup.data || []).map((x) => x.barkodNo).filter(Boolean));
+      }).catch(() => ({ data:[] }))));
+      tubeLists.forEach((tup) => barkods.push(...(tup.data || []).map((x) => x.barkodNo).filter(Boolean)));
     }
     if (!barkods.length) return;
     const detail = await apiJson("/Lis/LisRaporSonuc/getLisRaporDetay", {
       filter: JSON.stringify([{ filterType: "kriterPanel", property: "t.lisHastaTup.barkodNo", value: barkods, type: "Long", operator: "IN" }]),
       page: 1,
       start: 0,
-      limit: 300,
+      limit: 1500,
       group: JSON.stringify([{ property: "tupAdi", direction: "ASC" }]),
       sort: JSON.stringify([{ property: "lt.siraNo", direction: "ASC" }])
     });
@@ -4283,6 +4374,10 @@ ${consults || "-"}
       p.labs = summarized.labs;
       p.labDate = "";
     }
+    p.labs = p.labs || {};
+    TUMOR_MARKER_KEYS.forEach((key) => {
+      if (summarized.labs?.[key]?.length) p.labs[key] = summarized.labs[key];
+    });
     if (summarized.glucoseChecks.length) {
       p.glucoseChecks = summarized.glucoseChecks;
     } else if (!Array.isArray(p.glucoseChecks)) {
@@ -6721,18 +6816,21 @@ ${consults || "-"}
 
   function aoeWordLabTable(labs = {}, vitalLine = "") {
     const dates = labVisitDates(labs, 8);
+    const tumorMarkers = latestTumorMarkerText(labs);
     const border = '<w:tblBorders><w:top w:val="single" w:sz="2" w:color="D9DEE6"/>' +
       '<w:left w:val="single" w:sz="2" w:color="D9DEE6"/><w:bottom w:val="single" w:sz="2" w:color="D9DEE6"/>' +
       '<w:right w:val="single" w:sz="2" w:color="D9DEE6"/><w:insideH w:val="single" w:sz="2" w:color="E5E7EB"/>' +
       '<w:insideV w:val="single" w:sz="2" w:color="E5E7EB"/></w:tblBorders>';
     if (!dates.length) {
-      if (!vitalLine) return aoeWordParagraph("—", { size:9 });
+      if (!vitalLine && !tumorMarkers) return aoeWordParagraph("—", { size:9 });
       return '<w:tbl><w:tblPr><w:tblW w:w="0" w:type="auto"/>' + border + '</w:tblPr>' +
         '<w:tblGrid><w:gridCol w:w="780"/><w:gridCol w:w="3720"/></w:tblGrid>' +
         '<w:tr>' + aoeWordTableCell("Tetkik", { width:780, bold:true, shade:"EEF2F7", align:"left" }) +
         aoeWordTableCell("Son", { width:3720, bold:true, shade:"EEF2F7" }) + '</w:tr>' +
-        '<w:tr>' + aoeWordTableCell("Vital", { width:780, bold:true, align:"left" }) +
-        aoeWordTableCell(vitalLine, { width:3720, align:"left" }) + '</w:tr></w:tbl>';
+        (vitalLine ? '<w:tr>' + aoeWordTableCell("Vital", { width:780, bold:true, align:"left" }) +
+        aoeWordTableCell(vitalLine, { width:3720, align:"left" }) + '</w:tr>' : "") +
+        (tumorMarkers ? '<w:tr>' + aoeWordTableCell("Tümör", { width:780, bold:true, align:"left" }) +
+        aoeWordTableCell(tumorMarkers, { width:3720, align:"left" }) + '</w:tr>' : "") + '</w:tbl>';
     }
     const firstWidth = 732;
     const dataWidth = Math.max(420, Math.floor(3768 / dates.length));
@@ -6752,8 +6850,10 @@ ${consults || "-"}
       aoeWordTableCell(latestElectrolyteText(labs), { width:fullDataWidth, span:dates.length, align:"left" }) + '</w:tr>';
     const vital = vitalLine ? '<w:tr>' + aoeWordTableCell("Vital", { width:firstWidth, bold:true, align:"left" }) +
       aoeWordTableCell(vitalLine, { width:fullDataWidth, span:dates.length, align:"left" }) + '</w:tr>' : "";
+    const tumor = tumorMarkers ? '<w:tr>' + aoeWordTableCell("Tümör", { width:firstWidth, bold:true, align:"left" }) +
+      aoeWordTableCell(tumorMarkers, { width:fullDataWidth, span:dates.length, align:"left" }) + '</w:tr>' : "";
     return '<w:tbl><w:tblPr><w:tblW w:w="0" w:type="auto"/><w:tblLayout w:type="fixed"/>' + border +
-      '</w:tblPr>' + grid + header + rows + electro + vital + '</w:tbl>';
+      '</w:tblPr>' + grid + header + rows + electro + vital + tumor + '</w:tbl>';
   }
 
   function aoeWordPatient(p) {

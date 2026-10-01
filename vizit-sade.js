@@ -2237,9 +2237,13 @@
     };
 
     for (const row of details || []) {
-      const test = row?.lisHastaTupTetkik?.tetkik?.adi || row?.tetkik?.adi || "";
-      const value = row?.lisHastaTupTetkik?.sonucByRapor || row?.sonucByRapor || row?.sonuc || "";
-      const resultDate = row?.lisHastaTupTetkik?.sonucTarihi || row?.lisHastaTupTetkik?.onayTarihi || row?.sonucTarihi || row?.onayTarihi || "";
+      const test = row?.lisHastaTupTetkik?.tetkik?.adi || row?.lisHastaTupTetkik?.tetkikAdi ||
+        row?.tetkik?.adi || row?.lisTetkik?.adi || row?.tetkikTanim?.adi ||
+        row?.tetkikAdi || row?.parametreAdi || row?.testAdi || row?.hizmetAdi || "";
+      const value = row?.lisHastaTupTetkik?.sonucByRapor || row?.lisHastaTupTetkik?.sonuc ||
+        row?.sonucByRapor || row?.sonuc || row?.sonucDegeri || row?.deger || "";
+      const resultDate = row?.lisHastaTupTetkik?.sonucTarihi || row?.lisHastaTupTetkik?.onayTarihi ||
+        row?.sonucTarihi || row?.onayTarihi || row?.raporTarihi || row?.eklemeTarihi || "";
       const date = collectionDate(row, resultDate);
       const source = labSourceText(row);
       if (isCulture(source + " " + test)) {
@@ -4355,16 +4359,25 @@ ${consults || "-"}
       }).catch(() => ({ data:[] }))));
       tubeLists.forEach((tup) => barkods.push(...(tup.data || []).map((x) => x.barkodNo).filter(Boolean)));
     }
-    if (!barkods.length) return;
-    const detail = await apiJson("/Lis/LisRaporSonuc/getLisRaporDetay", {
-      filter: JSON.stringify([{ filterType: "kriterPanel", property: "t.lisHastaTup.barkodNo", value: barkods, type: "Long", operator: "IN" }]),
-      page: 1,
-      start: 0,
-      limit: 1500,
-      group: JSON.stringify([{ property: "tupAdi", direction: "ASC" }]),
-      sort: JSON.stringify([{ property: "lt.siraNo", direction: "ASC" }])
-    });
-    const summarized = summarizeLabs(detail.data || []);
+    const uniqueBarkods = [...new Set(barkods.map(clean).filter(Boolean))];
+    if (!uniqueBarkods.length) return;
+    // Çok sayıda geçmiş barkodu tek sorguda istemek FONET'in sonuç limitine takılıyor
+    // ve özellikle seyrek çalışılan tümör markerlerinin kaybolmasına yol açıyordu.
+    // Küçük barkod gruplarını ayrı ayrı alarak bütün geçmiş sonuçları koru.
+    const detailRows = [];
+    for (let offset = 0; offset < uniqueBarkods.length; offset += 18) {
+      const barcodeBatch = uniqueBarkods.slice(offset, offset + 18);
+      const detail = await apiJson("/Lis/LisRaporSonuc/getLisRaporDetay", {
+        filter: JSON.stringify([{ filterType: "kriterPanel", property: "t.lisHastaTup.barkodNo", value: barcodeBatch, type: "Long", operator: "IN" }]),
+        page: 1,
+        start: 0,
+        limit: 1500,
+        group: JSON.stringify([{ property: "tupAdi", direction: "ASC" }]),
+        sort: JSON.stringify([{ property: "lt.siraNo", direction: "ASC" }])
+      }).catch(() => ({ data:[] }));
+      detailRows.push(...(detail.data || []));
+    }
+    const summarized = summarizeLabs(detailRows);
     const mainLabDate = relevantLabDate(summarized.labs);
     const labDateText = compactLabDateHeader(labVisitDates(summarized.labs, 8));
     if (mainLabDate) {

@@ -3915,7 +3915,9 @@ ${consults || "-"}
         if (stamp && (!old || stamp < old.stamp)) firstDateByOrder.set(key, { stamp, date });
       });
     });
-    p.orders = p.orderRows.filter(isMedicineOrderRaw).slice(0, 12).map((x) => ({
+    // Vizit çıktısında aktif ilaçların tamamı yer almalı; kart özeti kendi
+    // görünüm sınırını ayrıca uygular. Burada kesmek Word'de ilaç kaybettirir.
+    p.orders = p.orderRows.filter(isMedicineOrderRaw).map((x) => ({
       id: x.id,
       name: orderRawName(x),
       dose: x.doz || "",

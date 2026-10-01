@@ -3500,9 +3500,45 @@ ${consults || "-"}
         page:1, start:0, limit:500,
         sort:JSON.stringify([{ property:"sevkTarihi", direction:"ASC" }])
       });
-      const rows = Array.isArray(data.data) ? data.data : [];
+      let rows = Array.isArray(data.data) ? data.data : [];
+      const rowStart = (row) => row.sevkTarihi || row.yatisTarihi || row.kabulTarihi || row.baslangicTarihi || "";
+      const rowEnd = (row) => row.sevkBitisTarihi || row.ayrilisTarihi || row.cikisTarihi || row.taburcuTarihi || row.bitisTarihi || "";
+      const rowUnit = (row) => clean(
+        row.birim?.adi || row.yatak?.oda?.birim?.adi || row.klinik?.yatak?.oda?.birim?.adi ||
+        row.servis?.adi || row.birimAdi || row.servisAdi || ""
+      );
+      if (p.hastaId && rows.length) {
+        try {
+          const allData = await apiJson("/Tibbi/HastaBirimSevk/getKayitList", {
+            filterMap:"",
+            filter:JSON.stringify([{
+              index:1, property:"hastaGelis.hasta.id", value:Number(p.hastaId),
+              filterType:"kriterPanel", type:"Long", operator:"="
+            }]),
+            page:1, start:0, limit:500,
+            sort:JSON.stringify([{ property:"sevkTarihi", direction:"DESC" }])
+          });
+          const allRows = Array.isArray(allData.data) ? allData.data : [];
+          const firstCurrentStamp = Math.min(...rows.map((row) => parseTrDate(rowStart(row))).filter(Boolean));
+          const previous = Number.isFinite(firstCurrentStamp) ? allRows
+            .filter((row) => {
+              const stamp = parseTrDate(rowStart(row));
+              const sameVisit = clean(row.hastaGelis?.id || row.hastaGelisId) === clean(p.hastaGelisId);
+              return stamp && stamp < firstCurrentStamp && !sameVisit;
+            })
+            .sort((a, b) => parseTrDate(rowStart(b)) - parseTrDate(rowStart(a)))[0] : null;
+          if (previous && /yoğun\s*bakım|yogun\s*bakim|\bybu\b/i.test(rowUnit(previous))) {
+            const previousEnd = parseTrDate(rowEnd(previous));
+            const directlyTransferred = !previousEnd || Math.abs(firstCurrentStamp - previousEnd) <= 2 * 86400000;
+            const explicitlyDischarged = /taburcu|exitus|eve\s*çıkış|eve\s*cikis/i.test(clean(
+              previous.cikisSekli?.adi || previous.taburcuSekli?.adi || previous.durum?.adi || previous.aciklama || ""
+            ));
+            if (directlyTransferred && !explicitlyDischarged) rows = [previous, ...rows];
+          }
+        } catch (e) { /* Aynı hasta gelişi içindeki hareketler yine kullanılabilir. */ }
+      }
       const dates = rows.map((row) =>
-        row.sevkTarihi || row.yatisTarihi || row.kabulTarihi || row.baslangicTarihi || ""
+        rowStart(row)
       ).filter((value) => parseTrDate(value));
       if (dates.length) {
         dates.sort((a, b) => parseTrDate(a) - parseTrDate(b));
@@ -3750,26 +3786,39 @@ ${consults || "-"}
     const admissionDate = aoeDate(p.yatis || p.admission || p.yatisTarihi || "");
     if (admissionDate) {
       try {
-        const historyFilter = [
-          { index:1, property:"tarihTuru", value:"tarihAraligiIcinde", filterType:"kriterPanel", isEnum:false, type:"String", operator:"=" },
-          { index:2, property:"tarih", value:`${admissionDate} 00:00:00`, filterType:"kriterPanel", type:"date", operator:"=" },
-          { index:3, property:"e.baslangicTarihi", value:`${admissionDate} 00:00:00`, filterType:"kriterPanel", type:"date", operator:">=" },
-          { index:4, property:"e.baslangicTarihi", value:end, filterType:"kriterPanel", type:"date", operator:"<=" },
-          { index:5, property:p.hastaGelisId ? "birimSevk.hastaGelis.id" : "birimSevk.id", value:Number(p.hastaGelisId || p.birimSevkId), filterType:"kriterPanel", type:"Long", operator:"=" },
-          { index:6, property:"yeri", value:2, filterType:"kriterPanel", isEnum:true, type:"tr.com.fonet.hbys.common.enums.EOrderYeri", operator:"=" },
-          { index:7, property:"hemsireOrder", value:"false", filterType:"kriterPanel", isEnum:false, type:"String", operator:"=" }
-        ];
-        const historyData = await apiJson("/Stok/EOrder/getKayitList", {
-          autoStores:["turu", "stokTuru", "antibiyotikTuru", "ekstravazeIlacSekli", "durum"],
-          filterMap:"", filter:JSON.stringify(historyFilter), page:1, start:0, limit:1000
+        const sevkIds = [...new Set([
+          ...(p.admissionHistory || []).map((row) => row.id || row.birimSevkId || row.hastaBirimSevkId),
+          p.birimSevkId
+        ].map((value) => Number(value)).filter(Number.isFinite))];
+        const collected = [];
+        for (const sevkId of sevkIds) {
+          const historyFilter = [
+            { index:1, property:"tarihTuru", value:"tarihAraligiIcinde", filterType:"kriterPanel", isEnum:false, type:"String", operator:"=" },
+            { index:2, property:"tarih", value:`${admissionDate} 00:00:00`, filterType:"kriterPanel", type:"date", operator:"=" },
+            { index:3, property:"e.baslangicTarihi", value:`${admissionDate} 00:00:00`, filterType:"kriterPanel", type:"date", operator:">=" },
+            { index:4, property:"e.baslangicTarihi", value:end, filterType:"kriterPanel", type:"date", operator:"<=" },
+            { index:5, property:"birimSevk.id", value:sevkId, filterType:"kriterPanel", type:"Long", operator:"=" },
+            { index:6, property:"yeri", value:2, filterType:"kriterPanel", isEnum:true, type:"tr.com.fonet.hbys.common.enums.EOrderYeri", operator:"=" },
+            { index:7, property:"hemsireOrder", value:"false", filterType:"kriterPanel", isEnum:false, type:"String", operator:"=" }
+          ];
+          const historyData = await apiJson("/Stok/EOrder/getKayitList", {
+            autoStores:["turu", "stokTuru", "antibiyotikTuru", "ekstravazeIlacSekli", "durum"],
+            filterMap:"", filter:JSON.stringify(historyFilter), page:1, start:0, limit:1000
+          });
+          if (Array.isArray(historyData.data)) collected.push(...historyData.data);
+        }
+        if (collected.length) historyRows = collected.filter((row, index, all) => {
+          const identity = (item) => clean(item.id) || [
+            norm(orderRawName(item)), clean(item.baslangicTarihi), clean(item.birimSevk?.id || item.birimSevkId)
+          ].join("|");
+          return all.findIndex((candidate) => identity(candidate) === identity(row)) === index;
         });
-        if (Array.isArray(historyData.data) && historyData.data.length) historyRows = historyData.data;
       } catch (e) { /* Güncel orderler yine gösterilsin. */ }
     }
     p.orderHistoryRows = historyRows;
     const firstDateByOrder = new Map();
     historyRows.filter(isMedicineOrderRaw).forEach((row) => {
-      const key = norm(orderRawName(row));
+      const key = norm(aoeDrugName(orderRawName(row)));
       const date = row.baslangicTarihi || row.istemTarihi || row.kayitTarihi || row.eklemeTarihi || row.tarih || "";
       const stamp = parseTrDate(date);
       const old = firstDateByOrder.get(key);
@@ -3782,7 +3831,7 @@ ${consults || "-"}
       amount: x.miktar || "",
       unit: orderRawUnit(x),
       usage: orderRawUsage(x),
-      start: firstDateByOrder.get(norm(orderRawName(x)))?.date || x.baslangicTarihi || "",
+      start: firstDateByOrder.get(norm(aoeDrugName(orderRawName(x))))?.date || x.baslangicTarihi || "",
       status: x.durum,
       raw: x
     })).filter((x) => x.name);
@@ -6010,13 +6059,15 @@ ${consults || "-"}
       .trim();
     if (!value) return false;
     if (/\b(mrcp|ercp|eus|ptk)\b/.test(value) ||
+        /\bpet\b.{0,8}\b(?:bt|ct)\b|\b(?:bt|ct)\b.{0,8}\bpet\b/.test(value) ||
+        /\bdinamik\b.*\b(karaciger|pankreas)\b|\b(karaciger|pankreas)\b.*\bdinamik\b/.test(value) ||
         /\b(ozefagoskopi|ozofagoskopi|kolonoskopi)\b/.test(value) ||
         /endoskopik\s+(retrograd|ultrason)/.test(value) ||
         /mr\s+kolanji/.test(value) || /perkutan\s+transhepatik/.test(value)) return true;
     const isBt = /\bbt\b/.test(value);
     if (isBt && (/\btoraks\b/.test(value) ||
       (/\babdomen\b/.test(value) && /\b(alt|ust|tum|total)\b/.test(value)))) return true;
-    return (/\babdomen\b/.test(value) || /\bhepatobili(?:yer|er)\b/.test(value)) && /\b(us|usg|ultrason|ultrasonografi)\b/.test(value);
+    return (/\babdomen\b/.test(value) || /\bhepatob(?:ili|ily|il)(?:yer|er)\b/.test(value)) && /\b(us|usg|ultrason|ultrasonografi)\b/.test(value);
   }
 
   function aoeRecentImaging(p) {
@@ -6285,7 +6336,9 @@ ${consults || "-"}
     aoeAllRecentImaging(p).forEach((item) => {
       const name = aoeImagingName(item);
       if (aoeIsImageGuidedBiopsy(item)) {
-        add(3, "Biyopsi", item.reportDate || item.raporTarihi || item.date || item.tarih);
+        const report = cleanMultiline(item.reportText || item.report || "");
+        const reportDate = item.reportDate || item.raporTarihi || "";
+        if (report && parseTrDate(reportDate)) add(3, "Biyopsi", reportDate);
       } else if (name) add(1, name, item.date || item.reportDate || item.tarih || item.raporTarihi);
     });
     (p.cultures || []).forEach((item) => add(2, item.name || "Kültür", item.date));
@@ -6302,7 +6355,6 @@ ${consults || "-"}
         const imagingOrder = clean(item.text).match(/\b(EKG|PAAG|ADBG)\b|PA\s+AKCİĞER\s+GRAFİSİ|AYAKTA\s+DİREKT\s+BATIN\s+GRAFİSİ/i)?.[0];
         if (imagingOrder) add(1, imagingOrder.toLocaleUpperCase("tr-TR"), item.date);
       }
-      if (/bi(?:y)?opsi|tru[ -]?cut/i.test(item.text)) add(3, "Biyopsi", item.date);
       const blood = aoeBloodPreparationLabel(item.text, item.amount);
       if (blood) add(4, blood, item.date);
     });
@@ -6387,7 +6439,13 @@ ${consults || "-"}
   }
 
   function aoeFixedManifest() {
-    const current = (state.patients || []).map((p) => ({ keys: aoePatientKeys(p), ...aoeFixedFor(p) }));
+    const current = (state.patients || []).map((p) => ({
+      keys:aoePatientKeys(p),
+      room:clean(p.oda || ""),
+      clinic:aoeClinicName(p),
+      xml:aoeWordPatient(p),
+      ...aoeFixedFor(p)
+    }));
     const currentKeys = new Set(current.flatMap((p) => p.keys || []));
     const preserved = (state.aoePreviousPatients || []).filter((p) =>
       !(p.keys || []).some((key) => currentKeys.has(key))
@@ -6930,13 +6988,13 @@ ${consults || "-"}
   }
 
   function aoeIsPatientTitleText(text) {
-    const parts = clean(text).split("-").map(clean).filter(Boolean);
+    const parts = clean(text).replace(/[‐‑‒–—―−]/g, "-").split("-").map(clean).filter(Boolean);
     if (parts.length < 4 || !/^\d{1,3}[EK]?$/.test(parts[parts.length - 1] || "")) return false;
     return /^[A-ZÇĞİÖŞÜ]{1,6}$/i.test(parts[0] || "") && /\d/.test(parts[1] || "");
   }
 
   function aoeCombinedPatientTitle(first, second) {
-    const joined = clean([first, second].filter(Boolean).join(" "));
+    const joined = clean([first, second].filter(Boolean).join(" ")).replace(/[‐‑‒–—―−]/g, "-");
     return aoeIsPatientTitleText(joined) ? joined : "";
   }
 
@@ -7040,14 +7098,14 @@ ${consults || "-"}
   }
 
   function aoeNameFromPatientTitle(title) {
-    const parts = clean(title).split("-").map(clean).filter(Boolean);
+    const parts = clean(title).replace(/[‐‑‒–—―−]/g, "-").split("-").map(clean).filter(Boolean);
     const lastIsAge = /^\d{1,3}[EK]?$/.test(parts[parts.length - 1] || "");
     const nameStart = parts.length >= 4 ? 2 : 1;
     return clean(parts.slice(nameStart, lastIsAge ? -1 : undefined).join("-"));
   }
 
   function aoeRoomFromPatientTitle(title) {
-    const parts = clean(title).split("-").map(clean).filter(Boolean);
+    const parts = clean(title).replace(/[‐‑‒–—―−]/g, "-").split("-").map(clean).filter(Boolean);
     return parts.length >= 4 ? clean(parts[1]) : "";
   }
 
@@ -7063,7 +7121,7 @@ ${consults || "-"}
     return aoeIsPatientTitleText(allLines) ? allLines : "";
   }
 
-  function aoePreviousWordPatients(documentXml) {
+  function aoePreviousWordPatients(documentXml, knownPatients = []) {
     const body = String(documentXml || "").match(/<w:body[^>]*>([\s\S]*?)<\/w:body>/)?.[1] || "";
     const blocks = body.match(/<w:p\b[\s\S]*?<\/w:p>|<w:tbl\b[\s\S]*?<\/w:tbl>/g) || [];
     const result = []; let current = null; let pendingClinicXml = ""; let activeClinicName = "";
@@ -7079,6 +7137,9 @@ ${consults || "-"}
       current = null;
     };
     const infos = blocks.map((block) => block.startsWith("<w:p") ? aoeWordBlockInfo(block) : { text:"", lines:[], sizes:[], centered:false });
+    const known = (knownPatients || []).filter((patient) =>
+      aoeLooseIdentity(patient?.name || "").replace(/\d/g, "").length >= 5
+    );
     for (let index = 0; index < blocks.length; index += 1) {
       const block = blocks[index];
       const info = infos[index];
@@ -7088,6 +7149,12 @@ ${consults || "-"}
         ? aoeCombinedPatientTitle(titleLine, nextTitleLine)
         : "";
       const isPatientTitle = aoeIsPatientTitleText(titleLine) && titleLine !== "VİZİT SADE";
+      const combinedBlockText = clean([info.text, infos[index + 1]?.text].filter(Boolean).join(" "));
+      const knownPatient = known.find((patient) => {
+        const name = aoeLooseIdentity(patient.name || "");
+        return name && aoeLooseIdentity(combinedBlockText).includes(name);
+      });
+      const knownStartsHere = Boolean(knownPatient && info.sizes.some((size) => Number(size) >= 28));
       const isClinicHeading = info.sizes.includes("24") && info.centered && info.text;
       if (joinedTitle) {
         finish();
@@ -7098,6 +7165,18 @@ ${consults || "-"}
         finish();
         current = { name:aoeNameFromPatientTitle(titleLine), room:aoeRoomFromPatientTitle(titleLine), blocks:[block], clinicXml:pendingClinicXml, clinicName:activeClinicName };
         pendingClinicXml = "";
+      } else if (knownStartsHere) {
+        finish();
+        const nameIsInCurrentBlock = aoeLooseIdentity(info.text).includes(aoeLooseIdentity(knownPatient.name || ""));
+        current = {
+          name:clean(knownPatient.name || ""),
+          room:clean(knownPatient.room || aoeRoomFromPatientTitle(combinedBlockText)),
+          blocks:nameIsInCurrentBlock ? [block] : [block, blocks[index + 1]],
+          clinicXml:pendingClinicXml,
+          clinicName:activeClinicName
+        };
+        pendingClinicXml = "";
+        if (!nameIsInCurrentBlock) index += 1;
       } else if (isClinicHeading) {
         finish();
         pendingClinicXml = block;
@@ -7166,7 +7245,31 @@ ${consults || "-"}
       (payload.patients || []).forEach((patient) => (patient.keys || []).forEach((key) => { map[key] = patient; }));
       state.aoePreviousFixed = map;
       state.aoePreviousPatients = payload.patients || [];
-      state.aoePreviousWordPatients = aoePreviousWordPatients(documentXml);
+      const parsedWordPatients = aoePreviousWordPatients(documentXml, payload.patients || []);
+      const embeddedWordPatients = (payload.patients || []).filter((patient) => clean(patient.xml || "")).map((patient) => ({
+        name:clean(patient.name || ""),
+        room:clean(patient.room || ""),
+        keys:Array.isArray(patient.keys) ? patient.keys : [],
+        xml:String(patient.xml || ""),
+        clinicName:clean(patient.clinic || ""),
+        clinicXml:""
+      }));
+      embeddedWordPatients.forEach((patient) => {
+        if (!parsedWordPatients.some((parsed) => aoePreviousMatchesPatient(parsed, { adSoyad:patient.name, oda:patient.room }))) {
+          parsedWordPatients.push(patient);
+        }
+      });
+      parsedWordPatients.forEach((wordPatient) => {
+        const fixedPatient = (payload.patients || []).find((patient) =>
+          aoePreviousMatchesPatient(wordPatient, { adSoyad:patient.name, oda:patient.room })
+        );
+        if (fixedPatient) {
+          fixedPatient.xml = wordPatient.xml;
+          fixedPatient.room = wordPatient.room || fixedPatient.room || "";
+          fixedPatient.clinic = wordPatient.clinicName || fixedPatient.clinic || "";
+        }
+      });
+      state.aoePreviousWordPatients = parsedWordPatients;
       state.aoePreviousFileName = file.name;
       state.aoePreviousPatientCount = (payload.patients || []).length;
       state.aoePreviousMissingCount = aoeMissingPreviousWordPatients().length;

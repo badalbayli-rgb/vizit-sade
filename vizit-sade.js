@@ -2152,10 +2152,14 @@
     const isCulture = (source) => /kultur|kültür|mikrobiyoloji|antibiyogram/.test(searchNorm(source));
     const isHemogram = (source) => /hemogram|tam\s*kan|kan\s*say|cbc|mor\s*kapak|edta/.test(searchNorm(source));
     const numericResult = (value) => {
-      const text = clean(value);
-      const match = text.match(/^[<>]?\s*[+-]?\d+(?:[,.]\d+)?(?:\s*(?:H|L|\*)){0,2}$/i);
+      const text = clean(String(value == null ? "" : value)
+        .replace(/<[^>]*>/g, " ")
+        .replace(/&nbsp;|&#160;/gi, " "));
+      // FONET yüksek/düşük sonuçları bazen HTML, birim veya H/L işaretiyle döndürür.
+      // Sonucun başındaki gerçek sayıyı al; tamamen sözel sonuçları yine dışarıda bırak.
+      const match = text.match(/^[<>]?\s*([+-]?\d+(?:[,.]\d+)?)/i);
       if (!match) return "";
-      return clean(text.replace(/\s*(?:H|L|\*)+\s*$/i, ""));
+      return clean(match[1]);
     };
     const isPrimaryLab = (key, source) => {
       if (key === "Glu") return false;
@@ -2296,6 +2300,25 @@
     glucoseChecks.sort((a, b) => String(b.sortKey || "").localeCompare(String(a.sortKey || "")));
     cultures.sort((a, b) => String(dateTimeKey(b.date)).localeCompare(String(dateTimeKey(a.date))));
     return { labs: wanted, glucoseChecks: glucoseChecks.slice(0, 12), cultures };
+  }
+
+  function flattenLabDetailRows(value, out = [], seen = new Set()) {
+    if (!value || typeof value !== "object" || seen.has(value)) return out;
+    seen.add(value);
+    if (Array.isArray(value)) {
+      value.forEach((item) => flattenLabDetailRows(item, out, seen));
+      return out;
+    }
+    const test = value?.lisHastaTupTetkik?.tetkik?.adi || value?.lisHastaTupTetkik?.tetkikAdi ||
+      value?.tetkik?.adi || value?.lisTetkik?.adi || value?.tetkikTanim?.adi ||
+      value?.tetkikAdi || value?.parametreAdi || value?.testAdi || value?.hizmetAdi || "";
+    const result = value?.lisHastaTupTetkik?.sonucByRapor || value?.lisHastaTupTetkik?.sonuc ||
+      value?.sonucByRapor || value?.sonuc || value?.sonucDegeri || value?.deger || "";
+    if (clean(test) && clean(result)) out.push(value);
+    ["data", "rows", "items", "children", "records", "list", "detayList", "sonucList"].forEach((key) => {
+      if (value[key] && typeof value[key] === "object") flattenLabDetailRows(value[key], out, seen);
+    });
+    return out;
   }
 
   function labLine(labs) {
@@ -4375,9 +4398,32 @@ ${consults || "-"}
         group: JSON.stringify([{ property: "tupAdi", direction: "ASC" }]),
         sort: JSON.stringify([{ property: "lt.siraNo", direction: "ASC" }])
       }).catch(() => ({ data:[] }));
-      detailRows.push(...(detail.data || []));
+      detailRows.push(...flattenLabDetailRows(detail.data || []));
     }
-    const summarized = summarizeLabs(detailRows);
+    let summarized = summarizeLabs(detailRows);
+    // Bazı FONET kurulumlarında geçmiş marker tüpleri barkod listesinde dönmüyor.
+    // Marker bulunamadıysa laboratuvar detayını geliş/hasta ilişkisi üzerinden de tara.
+    if (!latestTumorMarkerText(summarized.labs)) {
+      const directFilters = [
+        p.hastaGelisId ? { property:"t.lisHastaTup.lisKabul.hastaGelis.id", value:Number(p.hastaGelisId) } : null,
+        p.hastaGelisId ? { property:"t.lisHastaTup.lisKabul.hastaGelisId", value:Number(p.hastaGelisId) } : null,
+        p.hastaId ? { property:"t.lisHastaTup.lisKabul.hasta.id", value:Number(p.hastaId) } : null
+      ].filter(Boolean);
+      for (const directFilter of directFilters) {
+        const direct = await apiJson("/Lis/LisRaporSonuc/getLisRaporDetay", {
+          filter: JSON.stringify([{ filterType:"kriterPanel", ...directFilter, type:"Long", operator:"=" }]),
+          page:1, start:0, limit:2500,
+          group:JSON.stringify([{ property:"tupAdi", direction:"ASC" }]),
+          sort:JSON.stringify([{ property:"lt.siraNo", direction:"ASC" }])
+        }).catch(() => ({ data:[] }));
+        const directRows = flattenLabDetailRows(direct.data || []);
+        if (directRows.length) {
+          detailRows.push(...directRows);
+          summarized = summarizeLabs(detailRows);
+        }
+        if (latestTumorMarkerText(summarized.labs)) break;
+      }
+    }
     const mainLabDate = relevantLabDate(summarized.labs);
     const labDateText = compactLabDateHeader(labVisitDates(summarized.labs, 8));
     if (mainLabDate) {
@@ -6538,7 +6584,6 @@ ${consults || "-"}
           if (Object.prototype.hasOwnProperty.call(saved, field)) locked[field] = clean(saved[field] || "");
         });
         const merged = { ...live, ...locked };
-        if (live.admission) merged.admission = live.admission;
         merged.bh = aoeSanitizeKnownDiseases(merged.bh, p);
         return merged;
       }

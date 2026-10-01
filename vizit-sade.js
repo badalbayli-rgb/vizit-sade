@@ -7398,28 +7398,48 @@ ${consults || "-"}
     }
     await refreshAllDetails(true, "autoexport");
     info = aoeReadiness();
-    if (!info.ready) {
-      alert(info.failures
-        ? "OtoExport durduruldu: " + info.failures + " veri bölümü alınamadı. Detayları yenileyip tekrar deneyin."
-        : "OtoExport durduruldu: tarama henüz tamamlanmadı.");
+    if (!info.total) {
+      alert("Word dosyası oluşturulamadı: açık hasta listesi bulunamadı.");
       return false;
+    }
+    if (info.loading || state.busy) {
+      alert("Hasta taraması hâlâ devam ediyor. Birkaç saniye sonra tekrar deneyin.");
+      return false;
+    }
+    // Tek bir FONET isteğinin hata vermesi, eldeki hasta bilgilerinin indirilmesini
+    // engellememeli. Eksik bölümler panelde uyarı olarak kalır; DOCX yine oluşturulur.
+    if (info.failures) {
+      state.lastMessage = info.failures + " veri bölümü alınamadı; mevcut bilgilerle Word hazırlanıyor.";
     }
     return true;
   }
 
   function aoeSaveDocx(prefix = "Vizit-Sade") {
-    const blob = new Blob([aoeDocxBytes()], { type:"application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
+    const bytes = aoeDocxBytes();
+    if (!bytes?.length) throw new Error("DOCX içeriği oluşturulamadı.");
+    const blob = new Blob([bytes], { type:"application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
+    const doc = uiDocument() || document;
+    const a = doc.createElement("a");
+    const objectUrl = URL.createObjectURL(blob);
+    a.href = objectUrl;
     a.download = prefix + "-" + new Date().toISOString().slice(0,10) + ".docx";
+    a.style.display = "none";
+    (doc.body || doc.documentElement).appendChild(a);
     a.click();
-    window.setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    a.remove();
+    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 30000);
     return a.download;
   }
 
   async function aoeDownloadWord() {
-    if (!(await aoeEnsureReady())) return;
-    aoeSaveDocx("Vizit-Sade");
+    try {
+      if (!(await aoeEnsureReady())) return;
+      const fileName = aoeSaveDocx("Vizit-Sade");
+      state.lastMessage = fileName + " indirildi.";
+    } catch (e) {
+      console.error("Vizit Sade Word indirme hatası", e);
+      alert("Word dosyası indirilemedi: " + (e?.message || e));
+    }
   }
 
   async function aoeGoogleDocs() {

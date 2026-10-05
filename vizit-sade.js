@@ -1,7 +1,9 @@
 (() => {
-  const APP_VERSION = "1.9";
+  const APP_VERSION = "1.10";
   /********************************************************************
-   * VİZİT SADE V1.9 KLİNİK PANEL
+   * VİZİT SADE V1.10 KLİNİK PANEL
+   * - V1.10: Microsoft Word kaynaklı DOCX dosyalarındaki w14 ve diğer XML ad
+   *   alanları korunur; eski dosyadaki hasta blokları KONTROL'e eksiksiz taşınır.
    * - V1.9: yatış sonrası tek son klinik izlem, konsültasyon/biopsi takibi,
    *   ilk order tarihi, hepatobilier USG, sabit klinik sırası ve KONTROL grubu.
    * - V1.8: son 31 gündeki gerçek ameliyat servis yatışından önce olsa da POSTOP sayılır.
@@ -119,6 +121,11 @@
     lastGridSignature: "",
     lastLayoutSignature: "",
     cardRenderSignatures: {},
+    aoePreviousFixed: {},
+    aoePreviousPatients: [],
+    aoePreviousWordPatients: [],
+    aoePreviousWordNamespaces: {},
+    aoePreviousPatientBlockCount: 0,
     notificationLog: (() => {
       try {
         const value = JSON.parse(localStorage.getItem("vizitSadeNotifications") || "[]");
@@ -7088,7 +7095,7 @@ ${consults || "-"}
     });
     const body = aoeWordParagraph("VİZİT SADE", { size:17, bold:true, after:120 }) + orderedPatients;
     const documentXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
-      '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>' + body +
+      '<w:document' + aoeWordNamespaceAttributes(state.aoePreviousWordNamespaces || {}) + '><w:body>' + body +
       '<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1843" w:right="1121" w:bottom="1535" w:left="1005" w:header="720" w:footer="0"/><w:cols w:num="2" w:space="720" w:sep="1"/></w:sectPr></w:body></w:document>';
     const manifestXml = '<?xml version="1.0" encoding="UTF-8"?><aoeData>' + aoeXml(JSON.stringify(aoeFixedManifest())) + '</aoeData>';
     return aoeZip({
@@ -7232,12 +7239,15 @@ ${consults || "-"}
     return { version:0, generatedAt:"", patients:patients.filter((p) => p.name) };
   }
 
-  function aoeWordBlockInfo(xml) {
+  function aoeWordBlockInfo(xml, namespaces = {}) {
     try {
       const doc = new DOMParser().parseFromString(
-        '<root xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' + xml + '</root>',
+        '<root' + aoeWordNamespaceAttributes(namespaces) + '>' + xml + '</root>',
         "application/xml"
       );
+      if (doc.getElementsByTagName("parsererror").length) {
+        return { text:"", lines:[], sizes:[], centered:false };
+      }
       const byLocal = (name) => {
         const namespaced = Array.from(doc.getElementsByTagNameNS?.("*", name) || []);
         return namespaced.length ? namespaced : Array.from(doc.getElementsByTagName("w:" + name));
@@ -7269,6 +7279,28 @@ ${consults || "-"}
     return parts.length >= 4 ? clean(parts[1]) : "";
   }
 
+  const AOE_WORD_MAIN_NAMESPACE = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+
+  function aoeWordNamespaceMap(documentXml) {
+    const namespaces = { w:AOE_WORD_MAIN_NAMESPACE };
+    const rootAttributes = String(documentXml || "").match(/<w:document\b([^>]*)>/)?.[1] || "";
+    const expression = /\bxmlns:([A-Za-z_][\w.-]*)\s*=\s*(["'])(.*?)\2/g;
+    let match;
+    while ((match = expression.exec(rootAttributes))) {
+      const prefix = clean(match[1]);
+      const uri = clean(match[3]);
+      if (prefix && uri && prefix !== "xml" && prefix !== "xmlns") namespaces[prefix] = uri;
+    }
+    return namespaces;
+  }
+
+  function aoeWordNamespaceAttributes(namespaces = {}) {
+    return Object.entries({ ...namespaces, w:AOE_WORD_MAIN_NAMESPACE })
+      .filter(([prefix, uri]) => /^[A-Za-z_][\w.-]*$/.test(prefix) && clean(uri))
+      .map(([prefix, uri]) => ' xmlns:' + prefix + '="' + aoeXml(uri) + '"')
+      .join("");
+  }
+
   function aoePatientTitleFromBlockInfo(info) {
     const lines = (info?.lines || []).map(clean).filter(Boolean);
     const exact = lines.find((line) => aoeIsPatientTitleText(line));
@@ -7284,6 +7316,7 @@ ${consults || "-"}
   function aoePreviousWordPatients(documentXml, knownPatients = []) {
     const body = String(documentXml || "").match(/<w:body[^>]*>([\s\S]*?)<\/w:body>/)?.[1] || "";
     const blocks = body.match(/<w:p\b[\s\S]*?<\/w:p>|<w:tbl\b[\s\S]*?<\/w:tbl>/g) || [];
+    const namespaces = aoeWordNamespaceMap(documentXml);
     const result = []; let current = null; let pendingClinicXml = ""; let activeClinicName = "";
     const finish = () => {
       if (current?.name && current.blocks.length) result.push({
@@ -7296,7 +7329,7 @@ ${consults || "-"}
       });
       current = null;
     };
-    const infos = blocks.map((block) => block.startsWith("<w:p") ? aoeWordBlockInfo(block) : { text:"", lines:[], sizes:[], centered:false });
+    const infos = blocks.map((block) => block.startsWith("<w:p") ? aoeWordBlockInfo(block, namespaces) : { text:"", lines:[], sizes:[], centered:false });
     const known = (knownPatients || []).filter((patient) =>
       aoeLooseIdentity(patient?.name || "").replace(/\d/g, "").length >= 5
     );
@@ -7405,6 +7438,7 @@ ${consults || "-"}
       (payload.patients || []).forEach((patient) => (patient.keys || []).forEach((key) => { map[key] = patient; }));
       state.aoePreviousFixed = map;
       state.aoePreviousPatients = payload.patients || [];
+      state.aoePreviousWordNamespaces = aoeWordNamespaceMap(documentXml);
       const parsedWordPatients = aoePreviousWordPatients(documentXml, payload.patients || []);
       const embeddedWordPatients = (payload.patients || []).filter((patient) => clean(patient.xml || "")).map((patient) => ({
         name:clean(patient.name || ""),
@@ -7419,6 +7453,9 @@ ${consults || "-"}
           parsedWordPatients.push(patient);
         }
       });
+      if ((payload.patients || []).length && !parsedWordPatients.length) {
+        throw new Error("Hasta bilgileri okundu ancak Word hasta blokları çözümlenemedi; çıktı oluşturulmadı.");
+      }
       parsedWordPatients.forEach((wordPatient) => {
         const fixedPatient = (payload.patients || []).find((patient) =>
           aoePreviousMatchesPatient(wordPatient, { adSoyad:patient.name, oda:patient.room })
@@ -7430,17 +7467,21 @@ ${consults || "-"}
         }
       });
       state.aoePreviousWordPatients = parsedWordPatients;
+      state.aoePreviousPatientBlockCount = parsedWordPatients.length;
       state.aoePreviousFileName = file.name;
       state.aoePreviousPatientCount = (payload.patients || []).length;
       state.aoePreviousMissingCount = aoeMissingPreviousWordPatients().length;
       const loadedMessage = "YÜKLENDİ ✓ " + file.name + " • " + state.aoePreviousPatientCount +
-        " hasta • açık listede olmayan " + state.aoePreviousMissingCount + " hasta değişmeden korunacak";
+        " hasta • " + state.aoePreviousPatientBlockCount + " belge bloğu • açık listede olmayan " +
+        state.aoePreviousMissingCount + " hasta değişmeden korunacak";
       aoeSetOldFileStatus(true, loadedMessage);
       alert(loadedMessage);
     } catch (e) {
       state.aoePreviousFixed = {};
       state.aoePreviousPatients = [];
       state.aoePreviousWordPatients = [];
+      state.aoePreviousWordNamespaces = {};
+      state.aoePreviousPatientBlockCount = 0;
       state.aoePreviousFileName = "";
       state.aoePreviousPatientCount = 0;
       state.aoePreviousMissingCount = 0;

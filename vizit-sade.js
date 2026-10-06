@@ -1,7 +1,9 @@
 (() => {
-  const APP_VERSION = "1.10";
+  const APP_VERSION = "1.11";
   /********************************************************************
-   * VİZİT SADE V1.10 KLİNİK PANEL
+   * VİZİT SADE V1.11 KLİNİK PANEL
+   * - V1.11: Export klinik sırası Acil Genel Cerrahi, Genel Cerrahi 1-2,
+   *   Gastroenterolojik ve Onkolojik Cerrahi, Genel Cerrahi 3-4 olarak güncellendi.
    * - V1.10: Microsoft Word kaynaklı DOCX dosyalarındaki w14 ve diğer XML ad
    *   alanları korunur; eski dosyadaki hasta blokları KONTROL'e eksiksiz taşınır.
    * - V1.9: yatış sonrası tek son klinik izlem, konsültasyon/biopsi takibi,
@@ -6638,12 +6640,13 @@ ${consults || "-"}
 
   function aoeClinicPriority(name) {
     const value = norm(name);
+    if (/yoğun\s*bakım|yogun\s*bakim|\bybu\b/.test(value)) return 1000;
+    if (/acil.*genel\s*cerrahi|genel\s*cerrahi.*acil/.test(value)) return 0;
+    if (/gastroenteroloji(?:k)?.*onkolojik|gastroenteroloji(?:k)?\s*cerrahi|onkolojik\s*cerrahi|cerrahi\s*onkoloji/.test(value)) return 3;
     if (/genel\s*cerrahi/.test(value)) {
       const no = Number(value.match(/(?:kliniği|klinigi|servisi|servis)?\s*([1-4])\b/)?.[1] || value.match(/\b([1-4])\b/)?.[1] || 0);
-      return ({ 2:0, 1:1, 3:3, 4:4 })[no] ?? 5;
+      return ({ 1:1, 2:2, 3:4, 4:5 })[no] ?? 6;
     }
-    if (/gastroenteroloji(?:k)?.*onkolojik|gastroenteroloji(?:k)?\s*cerrahi|onkolojik\s*cerrahi|cerrahi\s*onkoloji/.test(value)) return 2;
-    if (/yoğun\s*bakım|yogun\s*bakim|\bybu\b/.test(value)) return 1000;
     return 100;
   }
 
@@ -6665,7 +6668,7 @@ ${consults || "-"}
   }
 
   function aoeEffectiveClinicOrder() {
-    // Klinik sırası sabittir: GC 2, GC 1, Gastro/Onkolojik, GC 3, GC 4,
+    // Export sırası sabittir: Acil GC, GC 1, GC 2, Gastro/Onkolojik, GC 3, GC 4,
     // diğer klinikler ve en sonda yoğun bakım. Eski yerel özel sıra bunu bozamaz.
     return aoeDefaultClinicOrder();
   }

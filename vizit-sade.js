@@ -1,7 +1,9 @@
 (() => {
-  const APP_VERSION = "1.11";
+  const APP_VERSION = "1.12";
   /********************************************************************
-   * VİZİT SADE V1.11 KLİNİK PANEL
+   * VİZİT SADE V1.12 KLİNİK PANEL
+   * - V1.12: Dünkü DOCX okunurken Word/Google Docs exportu kilitlenir; tanıların
+   *   yükleme tamamlanmadan canlı FONET verisiyle yazılması engellenir.
    * - V1.11: Export klinik sırası Acil Genel Cerrahi, Genel Cerrahi 1-2,
    *   Gastroenterolojik ve Onkolojik Cerrahi, Genel Cerrahi 3-4 olarak güncellendi.
    * - V1.10: Microsoft Word kaynaklı DOCX dosyalarındaki w14 ve diğer XML ad
@@ -128,6 +130,7 @@
     aoePreviousWordPatients: [],
     aoePreviousWordNamespaces: {},
     aoePreviousPatientBlockCount: 0,
+    aoePreviousFileLoading: false,
     notificationLog: (() => {
       try {
         const value = JSON.parse(localStorage.getItem("vizitSadeNotifications") || "[]");
@@ -7401,8 +7404,41 @@ ${consults || "-"}
     if (button) button.textContent = ok ? "YÜKLENDİ ✓ — Başka DOCX Seç" : "Dünkü DOCX Dosyasını Yükle";
   }
 
+  function aoeSetOldFileLoading(fileName) {
+    const status = uiEl("aoe-old-status");
+    const button = uiEl("aoe-load-old");
+    if (status) {
+      status.textContent = "DOCX OKUNUYOR… " + clean(fileName || "");
+      status.style.background = "#dbeafe";
+      status.style.color = "#1d4ed8";
+      status.style.fontWeight = "bold";
+    }
+    if (button) {
+      button.textContent = "DOCX OKUNUYOR…";
+      button.disabled = true;
+      button.style.opacity = ".55";
+      button.style.cursor = "wait";
+    }
+  }
+
+  function aoeFinishOldFileLoading() {
+    state.aoePreviousFileLoading = false;
+    const button = uiEl("aoe-load-old");
+    if (button) {
+      button.disabled = false;
+      button.style.opacity = "1";
+      button.style.cursor = "pointer";
+    }
+  }
+
   async function aoeLoadPreviousFile(file) {
     if (!file) return;
+    if (state.aoePreviousFileLoading) {
+      alert("Bir DOCX dosyası halen okunuyor. YÜKLENDİ mesajını bekleyin.");
+      return;
+    }
+    state.aoePreviousFileLoading = true;
+    aoeSetOldFileLoading(file.name);
     try {
       const entries = await aoeReadZipEntries(file);
       const documentXml = entries['word/document.xml'] || "";
@@ -7490,10 +7526,16 @@ ${consults || "-"}
       state.aoePreviousMissingCount = 0;
       aoeSetOldFileStatus(false, "YÜKLENEMEDİ — " + (e?.message || e));
       alert("Eski dosya okunamadı: " + (e?.message || e));
+    } finally {
+      aoeFinishOldFileLoading();
     }
   }
 
   async function aoeEnsureReady() {
+    if (state.aoePreviousFileLoading) {
+      alert("Dünkü DOCX halen okunuyor. YÜKLENDİ ✓ mesajı görünmeden çıktı oluşturulamaz.");
+      return false;
+    }
     let info = aoeReadiness();
     if (info.ready) return true;
     if (state.busy) {
@@ -7614,8 +7656,17 @@ ${consults || "-"}
       badge.textContent = "Taranıyor: " + info.processed + "/" + info.total + " hasta";
       badge.style.background = "#dbeafe"; badge.style.color = "#1e40af";
     }
-    if (word) word.style.opacity = info.ready ? "1" : ".65";
-    if (docs) docs.style.opacity = info.ready ? "1" : ".65";
+    const oldFileLoading = Boolean(state.aoePreviousFileLoading);
+    if (word) {
+      word.disabled = oldFileLoading;
+      word.style.opacity = oldFileLoading ? ".45" : (info.ready ? "1" : ".65");
+      word.style.cursor = oldFileLoading ? "wait" : "pointer";
+    }
+    if (docs) {
+      docs.disabled = oldFileLoading;
+      docs.style.opacity = oldFileLoading ? ".45" : (info.ready ? "1" : ".65");
+      docs.style.cursor = oldFileLoading ? "wait" : "pointer";
+    }
   }, 700);
 
 })();

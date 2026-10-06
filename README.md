@@ -1,6 +1,6 @@
 # Vizit Sade
 
-Güncel sürüm: **V1.11**
+Güncel sürüm: **V1.12**
 
 Fonet Canlı Vizit'in çalışan hasta toplama ve ayrıntı çekme altyapısını temel alan; yoğun servis vizitine uygun kompakt klinik panel ve toplu Word/Google Docs çıktısı sunan bağımsız tarayıcı betiği.
 
@@ -57,6 +57,7 @@ Google Docs seçeneği biçimi koruyan DOCX dosyasını indirir ve Google Drive'
 - Export klinik sırası `Acil Genel Cerrahi → Genel Cerrahi 1 → Genel Cerrahi 2 → Gastroenterolojik ve Onkolojik Cerrahi → Genel Cerrahi 3 → Genel Cerrahi 4 → diğer klinikler` şeklindedir; yoğun bakım en sonda, `KONTROL` hastaları ise belgenin sonunda kalır.
 - Dünkü DOCX'te olup güncel FONET listesinde bulunmayan hastalar, özgün hasta blokları değiştirilmeden çıktının sonundaki `KONTROL` başlığında kırmızı korunur; satıra bölünmüş hasta başlıkları da tanınır.
 - Microsoft Word tarafından eklenen `w14` ve diğer OOXML ad alanlarını kullanan DOCX dosyalarındaki hasta blokları da tam olarak okunur ve `KONTROL` bölümüne taşınır.
+- Dünkü DOCX okunurken Word ve Google Docs düğmeleri kilitlenir; `YÜKLENDİ ✓` mesajı görünmeden export alınamadığı için eski belgedeki tanı ve diğer sabit alanların canlı FONET verisiyle değişmesi engellenir.
 - `Görüntüleme eşliğinde karaciğer lezyon biopsi işlemi` dahil biyopsi kayıtları Takip'te kısaca `Biyopsi` olarak gösterilir.
 - Biyopsi, radyoloji raporu çıkmadan Takip'e eklenmez; rapor çıktığında istem tarihi yerine rapor tarihi kullanılır.
 - EKG, PAAG, ADBG, BT, ERCP, PTK ve diğer tüm son 45 günlük görüntülemeler Takip'te yalnızca ad olarak listelenir.

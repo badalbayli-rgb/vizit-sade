@@ -1,6 +1,10 @@
 # Vizit Sade
 
-Güncel sürüm: **V1.15**
+Güncel sürüm: **V1.16**
+
+V1.16: Konsültasyonlarda `Öneriler:`, `Önerilr:` veya benzeri öneri başlığı varsa sonrası; başlık yoksa ilk `**` işaretinden sonrası gösterilir. İşaret yoksa tam not korunur, ham konsültasyon verisi değiştirilmez. En fazla 10 konsültasyon gösterme kuralı devam eder. Kan tablosunun altında ve hasta kartlarında CA19-9, CA15-3, CA125 ve CEA daima listelenir; mevcut sonucun tarihi belirtilir, sonuç yoksa `—` yazılır.
+
+Çok sorgulu bölümlere uygulanan toplam 15 saniyelik zaman aşımı kaldırılmıştır. Her okuma sorgusu 20 saniyede iptal edilir; bağlantı/zaman aşımı ve geçici HTTP sunucu hatalarında bir kez tekrar denenir. Devam eden tarama ile kalıcı eksik bölüm uyarısı ayrılır; eksik bölüm adları ve üzerine gelindiğinde oda/bölüm/hata nedeni gösterilir. Başka bölüm yeniden denenirken çözülmemiş bölüm hataları silinmez. İzlemesi durdurulan hastalar tarama paydasında ayrıca belirtilir.
 
 V1.15: Hasta ayrıntıları, vizit metni, Takip ve Word/Google Docs çıktılarında en güncel en fazla 10 konsültasyon gösterilir. Önce yatış ve tarih filtreleri uygulanır, ardından en güncel 10 kayıt seçilir; nakil öncesi konsültasyonları koruyan düzeltme devam eder.
 

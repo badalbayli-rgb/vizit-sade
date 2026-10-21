@@ -11,9 +11,39 @@ const declarations = [...source.matchAll(/^  (?:async )?function (\w+)\(/gm)].ma
 const cleanStart = source.indexOf('  const clean =');
 const normEnd = source.indexOf('\n', source.indexOf('  const norm =', cleanStart));
 vm.runInContext(source.slice(cleanStart, normEnd) + '\n' + declarations.join('\n'), context);
+vm.runInContext(source.slice(source.indexOf('  const VISIT_LAB_ROWS'), source.indexOf('  function latestTumorMarkerText')) +
+  source.slice(source.indexOf('  const LAB_NORMAL_RANGES'), source.indexOf('  function labNumericValue')), context);
 const run = code => vm.runInContext(code, context);
+const originalApiJson = run('apiJson');
 let count = 0;
 function test(name, fn) { fn(); count++; console.log('PASS ' + name); }
+test('Consultation excerpts use recommendation headings, spelling variants, and double-star markers', () => {
+  for (const [text, expected] of [
+    ['Öykü ve muayene. Öneriler: Takip önerilir.', 'Takip önerilir.'],
+    ['Öykü\nÖNERİLER:\n1. Kontrol\n2. Rekons', '1. Kontrol\n2. Rekons'],
+    ['Öykü Önerilr: Kontrol', 'Kontrol'], ['Öykü\n**Tedavi ve takip', 'Tedavi ve takip'],
+    ['Öykü\n**Öneriler:**\nTakip', 'Takip'], ['İşaret yok: Tam not', 'İşaret yok: Tam not'],
+    ['Öykü\nÖneriler:', '']]) {
+    context.note = text; assert.equal(run('aoeConsultAnswerExcerpt(note)'), expected);
+  }
+});
+test('Tumor marker footer always lists four requested markers, dates, and zero values', () => {
+  context.labs = {CA199:[{value:4,date:'10.10.2026'},{value:8,date:'20.10.2026'}], CEA:[{value:0,date:'21.10.2026'}]};
+  assert.equal(run('latestTumorMarkerText(labs, true)'), 'CA19-9:8 (20.10) CA15-3:— CA125:— CEA:0 (21.10)');
+  assert.equal(run('latestTumorMarkerText({})'), '');
+  for (const output of [run('visitLabTableHtml(labs)'), run('aoeWordLabTable(labs)')]) {
+    for (const label of ['CA19-9', 'CA15-3', 'CA125', 'CEA']) assert.ok(output.includes(label));
+  }
+});
+test('Readiness shows exact failed sections and excludes paused patients from scan progress', () => {
+  run(`state.patients=[{key:'active',birimSevkId:1,oda:'TEST',lastFailedLabels:['Lab'],sectionErrors:{Lab:'Lab: HTTP 503'}},
+    {key:'paused',birimSevkId:2}]; state.pausedKeys=['paused']; state.metrics={processed:1}; state.bootstrapComplete=true; state.busy=false;`);
+  assert.equal(run('aoeReadiness().failureSummary'), 'Lab: 1');
+  assert.ok(run('aoeReadiness().failureDetails').includes('HTTP 503'));
+  assert.equal(run('aoeReadiness().total'), 1);
+  run(`state.patients[0].lastFailedLabels=[]`);
+  assert.equal(run('aoeReadiness().ready'), true);
+});
 
 test('Requested imaging names and existing imaging remain allowed', () => {
   for (const exam of ['Yüzeyel doku USG', 'BT Boyun kontrastlı', 'Boyun BT (kontrastlı)',
@@ -159,6 +189,23 @@ test('HTML and Word exports retain pre-transfer consultation answers and follow-
   }
 });
 async function integration() {
+  context.AbortController = AbortController;
+  context.URLSearchParams = URLSearchParams;
+  context.window = {location:{origin:'http://example.test'},setTimeout,clearTimeout};
+  let calls = 0;
+  context.fetch = async () => { calls++; return calls === 1
+    ? {ok:false,status:503} : {ok:true,text:async()=>'{"data":[]}'}; };
+  await originalApiJson('/read');
+  assert.equal(calls, 2);
+  calls = 0;
+  context.fetch = async () => { calls++; return {ok:false,status:403}; };
+  await assert.rejects(originalApiJson('/read'), /HTTP 403/);
+  assert.equal(calls, 1);
+  context.fetch = async (url, options) => new Promise((resolve,reject) => options.signal.addEventListener('abort',()=>{
+    const error = new Error('aborted'); error.name='AbortError'; reject(error);
+  }));
+  await assert.rejects(originalApiJson('/read',{}, {timeoutMs:5}), /zaman aşımı/);
+  count++; console.log('PASS Read queries retry transient errors, reject permission errors, and abort timed-out requests');
   context.rows = chain;
   context.patient = {hastaId:99, hastaGelisId:13, birimSevkId:4, errors:[]};
   run(`apiJson = async (url, options) => {
@@ -200,6 +247,19 @@ async function integration() {
   assert.equal(context.patient.consults.length, 56);
   assert.equal(context.patient.consults.find(x=>x.id===1).answer, 'Önceki geliş yanıtı');
   count++; console.log('PASS All episode visits are queried, duplicate answers retained, and 50-row truncation removed');
+  run(`state.active=true; state.patientRefreshAt={}; state.endpointFailures={}; state.metrics={cycles:3,requests:0,errors:0};
+    notifyChanges=()=>{}; scheduleRender=()=>{};
+    fetchOrders=async()=>{}; fetchLabs=async()=>{throw Error('HTTP 503')};`);
+  context.patient = {key:'retry-test',lastFailedLabels:['Lab','Order'],sectionErrors:{Lab:'Lab: eski hata',Order:'Order: eski hata'}};
+  await run(`refreshPatientDetails(patient, false, true, ['Order'])`);
+  assert.deepEqual(Array.from(context.patient.lastFailedLabels), ['Lab']);
+  await run(`refreshPatientDetails(patient, false, true, ['Lab'])`);
+  assert.equal(context.patient.sectionErrors.Lab, 'Lab: HTTP 503');
+  run(`fetchLabs=async()=>{}`);
+  await run(`refreshPatientDetails(patient, false, true, ['Lab'])`);
+  assert.equal(context.patient.lastFailedLabels.length, 0);
+  assert.equal(context.patient.errors.length, 0);
+  count++; console.log('PASS Partial retries preserve unresolved sections and clear only successfully recovered errors');
   console.log(`${count} regression groups passed`);
 }
 integration().catch(error => { console.error(error); process.exitCode = 1; });

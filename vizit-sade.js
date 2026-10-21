@@ -1,7 +1,9 @@
 (() => {
-  const APP_VERSION = "1.15";
+  const APP_VERSION = "1.16";
   /********************************************************************
-   * VİZİT SADE V1.15 KLİNİK PANEL
+   * VİZİT SADE V1.16 KLİNİK PANEL
+   * - V1.16: Kons öneri metni, dört temel tümör markeri satırı ve sorgu bazlı
+   *   zaman aşımı/tekrar deneme; eksik bölüm adları açıklanır.
    * - V1.15: Konsültasyon gösterimleri en güncel 10 kayıtla sınırlandırılır.
    * - V1.14: FONET Hasta Geçmişi getSevkList sorgusuyla ilk yatış bulunur;
    *   nakil öncesi konsültasyonlar aynı yatış sürecine dahil edilir.
@@ -1041,7 +1043,7 @@
     return encodeURIComponent(JSON.stringify(items));
   }
 
-  async function apiJson(path, params = {}) {
+  async function apiJson(path, params = {}, options = {}) {
     const query = new URLSearchParams({ _dc: Date.now() });
     Object.entries(params).forEach(([key, value]) => {
       if (Array.isArray(value)) value.forEach((item) => query.append(key, item));
@@ -1054,16 +1056,30 @@
       } catch (e) {}
       return fetch.bind(window);
     })();
-    const res = await fetchFn(url, {
-      credentials: "include",
-      headers: { "Accept": "application/json, text/plain, */*" }
-    });
-    const text = await res.text();
-    if (!res.ok) throw new Error(`${res.status} ${text.slice(0, 120)}`);
-    try {
-      return JSON.parse(text);
-    } catch (e) {
-      throw new Error(`JSON okunamadı: ${text.slice(0, 120)}`);
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const controller = new AbortController();
+      const timer = window.setTimeout(() => controller.abort(), options.timeoutMs || 20000);
+      let retryable = false;
+      try {
+        const res = await fetchFn(url, {
+          credentials:"include", signal:controller.signal,
+          headers:{ "Accept":"application/json, text/plain, */*" }
+        });
+        if (!res.ok) {
+          retryable = [408, 429, 500, 502, 503, 504].includes(res.status);
+          throw new Error(`HTTP ${res.status}`);
+        }
+        const text = await res.text();
+        let data;
+        try { data = JSON.parse(text); }
+        catch (e) { throw new Error("FONET JSON yanıtı alınamadı; oturum veya sunucu yanıtı kontrol edilmeli"); }
+        if (data.success === false || data.success === "false") throw new Error(clean(data.message || data.msg || "FONET isteği başarısız").slice(0, 180));
+        return data;
+      } catch (e) {
+        const timedOut = controller.signal.aborted || e.name === "AbortError";
+        retryable = retryable || timedOut || e.name === "TypeError";
+        if (!retryable || attempt === 1) throw new Error(timedOut ? "FONET sorgusu zaman aşımına uğradı (20 sn; tekrar denendi)" : e.message);
+      } finally { window.clearTimeout(timer); }
     }
   }
 
@@ -2428,10 +2444,15 @@
     CYFRA211:"CYFRA21-1", SCC:"SCC", CgA:"CgA"
   };
 
-  function latestTumorMarkerText(labs = {}) {
-    return TUMOR_MARKER_KEYS.map((key) => {
-      const item = (labs?.[key] || [])[0];
-      return item?.value ? `${TUMOR_MARKER_LABELS[key] || key}:${item.value}` : "";
+  function latestTumorMarkerText(labs = {}, includeMissing = false) {
+    const required = ["CA199", "CA153", "CA125", "CEA"];
+    const keys = [...required, ...TUMOR_MARKER_KEYS.filter((key) => !required.includes(key))];
+    return keys.map((key) => {
+      const item = (labs?.[key] || []).filter((x) => x.value != null && String(x.value).trim() !== "")
+        .slice().sort((a, b) => (parseTrDate(b.date) || 0) - (parseTrDate(a.date) || 0))[0];
+      const label = TUMOR_MARKER_LABELS[key] || key;
+      return item ? `${label}:${item.value}${shortDate(item.date) ? " (" + shortDate(item.date) + ")" : ""}`
+        : (includeMissing && required.includes(key) ? `${label}:—` : "");
     }).filter(Boolean).join(" ");
   }
 
@@ -2525,7 +2546,7 @@
 
   function visitLabTableText(labs = {}, vitalLine = "") {
     const dates = labVisitDates(labs, 8);
-    const tumorMarkers = latestTumorMarkerText(labs);
+    const tumorMarkers = latestTumorMarkerText(labs, true);
     if (!dates.length) {
       const rows = ["Tetkik\tSon"];
       if (vitalLine) rows.push(`Son Vital\t${vitalLine}`);
@@ -2582,7 +2603,7 @@
 
   function visitLabTableHtml(labs = {}, vitalLine = "") {
     const dates = labVisitDates(labs, 8);
-    const tumorMarkers = latestTumorMarkerText(labs);
+    const tumorMarkers = latestTumorMarkerText(labs, true);
     const tableStyle = "border-collapse:collapse;font-family:Arial Narrow,Arial,sans-serif;font-size:7.8pt;line-height:1.15;table-layout:fixed;width:100%;";
     const thStyle = "text-align:center;font-weight:bold;padding:1.2px 2.4px;border:1px solid #d9dee6;white-space:nowrap;";
     const firstThStyle = "text-align:left;font-weight:bold;padding:1.2px 2.4px;border:1px solid #d9dee6;white-space:nowrap;width:41pt;";
@@ -2603,7 +2624,7 @@
     }).join("")
       + `<tr><td style="${firstTdStyle}"><strong>Elekt</strong></td><td style="${tdStyle};text-align:left;" colspan="${Math.max(1, dates.length)}">${escapeHtml(latestElectrolyteText(labs))}</td></tr>`
       + (vitalLine ? `<tr><td style="${firstTdStyle}"><strong>Vital</strong></td><td style="${tdStyle};text-align:left;" colspan="${Math.max(1, dates.length)}">${escapeHtml(vitalLine)}</td></tr>` : "")
-      + (tumorMarkers ? `<tr><td style="${firstTdStyle}"><strong>Tümör</strong></td><td style="${tdStyle};text-align:left;" colspan="${Math.max(1, dates.length)}">${escapeHtml(tumorMarkers)}</td></tr>` : "");
+      + (tumorMarkers ? `<tr><td style="${firstTdStyle}"><strong>Tümör</strong></td><td style="${tdStyle};text-align:left;white-space:normal;" colspan="${Math.max(1, dates.length)}">${escapeHtml(tumorMarkers)}</td></tr>` : "");
     return `
       <table style="${tableStyle}">
         <thead><tr>${header}</tr></thead>
@@ -3092,7 +3113,7 @@
     const postop = operationBadge(p);
     const consults = latestConsults(p.consults)
       .filter((x) => x.answer || x.unit)
-      .map((x) => `(${shortDate(x.date) || "-"}) ${x.unit || "Kons"}${x.answer ? ":\n" + x.answer : ""}`)
+      .map((x) => `(${shortDate(x.date) || "-"}) ${x.unit || "Kons"}${x.answer ? ":\n" + aoeConsultAnswerExcerpt(x.answer) : ""}`)
       .join("\n");
     const orders = (p.orders || []).slice(0, 12).map((x) => `${x.name} ${x.dose}`.trim()).join("+");
     const rad = formatRadiology(p.radiology, 6, 260);
@@ -3135,7 +3156,7 @@ ${consults}
     const postop = operationBadge(p);
     const consults = latestConsults(p.consults)
       .filter((x) => x.answer || x.unit)
-      .map((x) => `(${shortDate(x.date) || "-"}) ${x.unit || "Kons"}${x.answer ? ":\n" + x.answer : ""}`)
+      .map((x) => `(${shortDate(x.date) || "-"}) ${x.unit || "Kons"}${x.answer ? ":\n" + aoeConsultAnswerExcerpt(x.answer) : ""}`)
       .join("\n");
     const orders = (p.orders || []).slice(0, 12).map((x) => `${x.name} ${x.dose}`.trim()).join("+");
     const rad = formatRadiology(p.radiology, 6, 260);
@@ -3282,7 +3303,7 @@ ${consults}
     const doctorCode = doctorInitials(p.doktor);
     const meta = extractCardMeta(p);
     const consults = latestConsults(p.consults).map((x) => {
-      const answer = x.answer ? `\n${x.answer}` : "";
+      const answer = x.answer ? `\n${aoeConsultAnswerExcerpt(x.answer)}` : "";
       return `(${shortDate(x.date) || "-"}) ${x.unit || "Kons"}${answer}`;
     }).join("\n---\n");
     const orders = (p.orders || []).map((x) => `- ${x.name} ${x.dose} ${x.amount || ""}`.trim()).join("\n");
@@ -3376,7 +3397,7 @@ ${consults || "-"}
           ${detailBlock("Diyet", `Kart:${dietInfo.code}${dietInfo.extra ? "\nEk:" + dietInfo.extra : ""}\nHam:${p.diyet || "-"}`)}
           ${detailBlock("Lab", labLine(p.labs) || "-")}
           ${detailBlock("Order", (p.orders || []).map((x) => `${x.name} ${x.dose}`).join("\n") || "-")}
-          ${detailBlock("Konsültasyon", latestConsults(p.consults).map((x) => `${x.unit || "Kons"}\n${x.answer || x.request || "-"}`).join("\n---\n") || "-")}
+          ${detailBlock("Konsültasyon", latestConsults(p.consults).map((x) => `${x.unit || "Kons"}\n${x.answer ? aoeConsultAnswerExcerpt(x.answer) : x.request || "-"}`).join("\n---\n") || "-")}
           ${detailBlock("Vitaller", formatVitals(p.vitals, 10) || "-")}
           ${detailBlock("Hemşire / Devir", (p.nursing || []).map((x) => `${x.date || ""}\n${x.text || ""}`).join("\n---\n") || "-")}
           ${detailBlock("Radyoloji", formatRadiology(p.radiology, 12, 1200) || "-")}
@@ -4517,12 +4538,13 @@ ${consults || "-"}
 
   async function refreshPatientDetails(p, shouldRender = true, forceAll = true, onlyLabels = null) {
     p.loading = true;
-    p.errors = [];
+    p.sectionErrors = p.sectionErrors || {};
+    p.errors = Object.values(p.sectionErrors);
     if (shouldRender) scheduleRender(25);
     const key = displayKey(p);
     const stamps = state.patientRefreshAt[key] || (state.patientRefreshAt[key] = {});
     const now = Date.now();
-    const failedLabels = [];
+    const failedLabels = new Set(p.lastFailedLabels || []);
     const due = (label, interval) => (!onlyLabels || onlyLabels.includes(label)) && (forceAll || !stamps[label] || now - stamps[label] >= interval);
     const run = async (label, interval, fn) => {
       if (!due(label, interval)) return;
@@ -4532,24 +4554,23 @@ ${consults || "-"}
       const warmup = state.metrics.cycles <= 2;
       if (!forceAll && !essential && !warmup && failure.retryAt > now) return;
       state.metrics.requests += 1;
-      let timeoutId = 0;
       try {
-        await Promise.race([
-          fn(),
-          new Promise((_, reject) => {
-            timeoutId = window.setTimeout(() => reject(new Error("15 sn zaman aşımı")), 15000);
-          })
-        ]);
+        // Bölüm birçok ardışık sorgu içerebilir. Her sorgu apiJson içinde
+        // iptal edilebilir; bölümü yarıda bırakıp arka planda tekrar başlatma.
+        await fn();
         stamps[label] = Date.now();
         delete state.endpointFailures[failureKey];
+        failedLabels.delete(label);
+        delete p.sectionErrors[label];
+        p.errors = p.errors.filter((error) => !error.startsWith(label + ":"));
       } catch (e) {
-        p.errors.push(`${label}: ${e.message}`);
-        failedLabels.push(label);
+        p.sectionErrors[label] = `${label}: ${e.message}`;
+        p.errors = p.errors.filter((error) => !error.startsWith(label + ":"));
+        p.errors.push(p.sectionErrors[label]);
+        failedLabels.add(label);
         const count = failure.count + 1;
         state.endpointFailures[failureKey] = { count, retryAt: Date.now() + (essential || warmup ? 30000 : Math.min(15 * 60000, Math.max(0, count - 1) * 120000)) };
         state.metrics.errors += 1;
-      } finally {
-        if (timeoutId) window.clearTimeout(timeoutId);
       }
     };
     await Promise.all([
@@ -4571,7 +4592,7 @@ ${consults || "-"}
     p.updatedAt = new Date().toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" });
     notifyChanges(p);
     if (shouldRender) scheduleRender(25);
-    p.lastFailedLabels = [...new Set(failedLabels)];
+    p.lastFailedLabels = [...failedLabels];
     return p.lastFailedLabels;
   }
 
@@ -4661,7 +4682,7 @@ ${consults || "-"}
     return [
       [item.date, item.unit].filter(Boolean).join(" | "),
       item.request ? `İstem: ${clip(item.request, 260)}` : "",
-      item.answer ? `Cevap: ${clip(item.answer, 520)}` : "Cevap: Bekliyor"
+      item.answer ? `Cevap: ${clip(aoeConsultAnswerExcerpt(item.answer), 520)}` : "Cevap: Bekliyor"
     ].filter(Boolean).join("\n");
   }
 
@@ -5054,7 +5075,7 @@ ${consults || "-"}
     const riskBadge = clean(freeText.match(/sarı risk|kırmızı risk|yüksek risk|düşme riski/i)?.[0] || "").toLocaleUpperCase("tr-TR");
     const orderText = (p.orders || []).slice(0, 5).map((x) => clean(`${x.name} ${x.dose}`)).filter(Boolean).join(" + ");
     const consultText = latestConsult.answer
-      ? `${latestConsult.unit || "Kons"} -> ${clip(latestConsult.answer, 90)}`
+      ? `${latestConsult.unit || "Kons"} -> ${clip(aoeConsultAnswerExcerpt(latestConsult.answer), 90)}`
       : (latestConsult.unit ? `${latestConsult.unit}${latestConsult.request ? " -> " + clip(latestConsult.request, 80) : ""}` : "");
     const radText = latestRad.exam
       ? `${shortDate(latestRad.date)} ${latestRad.exam}${latestRad.reportText ? ": " + clip(latestRad.reportText, 90) : (latestRad.reportId ? " [rapor var]" : "")}`
@@ -5253,7 +5274,7 @@ ${consults || "-"}
     const riskBadge = clean(freeText.match(/sarı risk|kırmızı risk|yüksek risk|düşme riski/i)?.[0] || "").toLocaleUpperCase("tr-TR");
     const orderText = (p.orders || []).slice(0, 4).map((x) => clean(`${x.name} ${x.dose}`)).filter(Boolean).join(" + ");
     const consultText = latestConsult.answer
-      ? `${latestConsult.unit || "Kons"} -> ${clip(latestConsult.answer, 78)}`
+      ? `${latestConsult.unit || "Kons"} -> ${clip(aoeConsultAnswerExcerpt(latestConsult.answer), 78)}`
       : (latestConsult.unit ? `${latestConsult.unit}${latestConsult.request ? " -> " + clip(latestConsult.request, 72) : ""}` : "");
     const radText = latestRad.exam
       ? `${shortDate(latestRad.date)} ${latestRad.exam}${latestRad.reportText ? ": " + clip(latestRad.reportText, 74) : (latestRad.reportId ? " [rapor var]" : "")}`
@@ -5325,6 +5346,7 @@ ${consults || "-"}
           ${labTilesHtmlV16(p.labs, t)}
         </div>
         <div style="font-size:10px;color:${t.muted};text-align:right;margin-top:3px;">Lab: ${escapeHtml(p.labDate || "zaman yok")} · 5 günlük trend için karta tıklayın</div>
+        <div style="font-size:10px;line-height:1.4;margin-top:4px;white-space:normal;"><b>Tümör:</b> ${escapeHtml(latestTumorMarkerText(p.labs, true))}</div>
         ${glucoseCheckHtml(p, t)}
 
         <div style="display:flex;gap:0;overflow:hidden;border:1px solid ${t.border};border-radius:9px;background:${t.surface};margin-top:8px;color:${t.text};font-size:11px;">
@@ -5453,7 +5475,7 @@ ${consults || "-"}
           ${detailBlockV16("Lab", `Tarih:${p.labDate || "-"}\n${labLine(p.labs) || "-"}`, t, "L")}
           ${p.glucoseChecks?.length ? detailBlockV16("Glukotest", glucoseCheckText(p, 12), t, "G") : ""}
           ${detailBlockV16("Görüntüleme", formatRadiology(p.radiology, 12, 1200) || "-", t, "G")}
-          ${detailBlockV16("Konsültasyon", latestConsults(p.consults).map((x) => `${x.unit || "Kons"}${x.date ? " | " + x.date : ""}\n${x.answer || x.request || "-"}`).join("\n---\n") || "-", t, "K")}
+          ${detailBlockV16("Konsültasyon", latestConsults(p.consults).map((x) => `${x.unit || "Kons"}${x.date ? " | " + x.date : ""}\n${x.answer ? aoeConsultAnswerExcerpt(x.answer) : x.request || "-"}`).join("\n---\n") || "-", t, "K")}
           ${detailBlockV16("Order", (p.orders || []).map((x) => `${x.name} ${x.dose}`).join("\n") || "-", t, "Rx")}
           ${detailBlockV16("Hemşire / Devir", (p.nursing || []).map((x) => `${x.date || ""}\n${x.text || ""}`).join("\n---\n") || "-", t, "N")}
           ${p.errors?.length ? detailBlockV16("Hatalar", p.errors.join("\n"), t, "!") : ""}
@@ -6329,7 +6351,11 @@ ${consults || "-"}
   }
 
   function aoeConsultAnswerExcerpt(value) {
-    return cleanMultiline(value || "");
+    const text = cleanMultiline(value || "");
+    const heading = /(?:^|[\s.;*])(?:oneriler(?:imiz)?|oneril[ie]?r|oneri)\s*[:;：-]\s*/.exec(searchNorm(text));
+    const stars = text.indexOf("**");
+    const start = heading ? heading.index + heading[0].length : (stars >= 0 ? stars + 2 : 0);
+    return cleanMultiline(text.slice(start).replace(/\*\*/g, ""));
   }
 
   function aoeDrugName(value) {
@@ -6881,12 +6907,22 @@ ${consults || "-"}
   }
 
   function aoeReadiness() {
-    const total = Number(state.patients?.length || 0);
+    const patients = (state.patients || []).filter((p) =>
+      (p.birimSevkId || p.hastaGelisId || p.hastaId) && !(state.pausedKeys || []).includes(displayKey(p)));
+    const total = patients.length;
     const processed = Math.min(total, Number(state.metrics?.processed || 0));
-    const failures = (state.patients || []).reduce((sum, p) => sum + (p.lastFailedLabels || []).length, 0);
-    const loading = (state.patients || []).filter((p) => p.loading).length;
+    const counts = new Map();
+    const details = [];
+    patients.forEach((p, index) => (p.lastFailedLabels || []).forEach((label) => {
+      counts.set(label, (counts.get(label) || 0) + 1);
+      details.push((p.oda || "Hasta " + (index + 1)) + " — " + (p.sectionErrors?.[label] ||
+        (p.errors || []).find((error) => error.startsWith(label + ":")) || label));
+    }));
+    const failures = [...counts.values()].reduce((sum, count) => sum + count, 0);
+    const failureSummary = [...counts].map(([label, count]) => label + ": " + count).join(", ");
+    const loading = patients.filter((p) => p.loading).length;
     const ready = Boolean(state.bootstrapComplete && !state.busy && total > 0 && processed >= total && !loading && !failures);
-    return { total, processed, failures, loading, ready };
+    return { total, processed, failures, loading, ready, failureSummary, failureDetails:details.join("\n"), excluded:(state.patients || []).length - total };
   }
 
   function aoeXml(value) {
@@ -6951,7 +6987,7 @@ ${consults || "-"}
 
   function aoeWordLabTable(labs = {}, vitalLine = "") {
     const dates = labVisitDates(labs, 8);
-    const tumorMarkers = latestTumorMarkerText(labs);
+    const tumorMarkers = latestTumorMarkerText(labs, true);
     const border = '<w:tblBorders><w:top w:val="single" w:sz="2" w:color="D9DEE6"/>' +
       '<w:left w:val="single" w:sz="2" w:color="D9DEE6"/><w:bottom w:val="single" w:sz="2" w:color="D9DEE6"/>' +
       '<w:right w:val="single" w:sz="2" w:color="D9DEE6"/><w:insideH w:val="single" w:sz="2" w:color="E5E7EB"/>' +
@@ -7710,12 +7746,18 @@ ${consults || "-"}
     if (!badge) return;
     if (orderSummary) orderSummary.textContent = "Çıktı sırası: " + (aoeEffectiveClinicOrder().join(" → ") || "Hasta listesi bekleniyor");
     const info = aoeReadiness();
+    badge.title = info.failureDetails || (info.excluded ? info.excluded + " hasta izleme dışında" : "");
     if (info.ready) {
       badge.textContent = "Hazır: " + info.total + "/" + info.total + " hasta tamamen tarandı" +
+        (info.excluded ? " • " + info.excluded + " hasta izleme dışında" : "") +
         (state.aoePreviousFileName ? " • Günlük dosya: " + state.aoePreviousFileName : "");
       badge.style.background = "#dcfce7"; badge.style.color = "#166534";
+    } else if (state.busy || info.loading) {
+      badge.textContent = "Taranıyor: " + info.processed + "/" + info.total +
+        (info.failures ? " • Tekrar denenecek: " + info.failureSummary : "");
+      badge.style.background = "#dbeafe"; badge.style.color = "#1e40af";
     } else if (info.failures) {
-      badge.textContent = "Eksik: " + info.processed + "/" + info.total + " hasta, " + info.failures + " bölüm alınamadı";
+      badge.textContent = "Eksik bölümler: " + info.failureSummary + " (neden için üzerine gelin)";
       badge.style.background = "#fef3c7"; badge.style.color = "#92400e";
     } else {
       badge.textContent = "Taranıyor: " + info.processed + "/" + info.total + " hasta";

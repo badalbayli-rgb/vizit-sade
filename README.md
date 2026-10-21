@@ -1,8 +1,6 @@
 # Vizit Sade
 
-Güncel sürüm: **V1.20**
-
-V1.20: Vizit kağıdında Konsültasyonlar ile Görüntüleme arasında ayrı **Anestezi** bölümü bulunur (HTML/Google Docs ve Word). ASA, POST-OP yer, geçirilmiş operasyonlar, ek hastalıklar ve kullandığı ilaçlar burada gösterilir. Anestezi formu yanıtlarında ASA Skoru / asaSkoru alanları, Roma rakamları ve Türkçe küçük harfleri tanınır (`III` → `3`). POST-OP Klinik/PACU/Yoğun Bakım alanlarında yalnız seçili kutular alınır. Geçirilmiş operasyonlar GO, ek hastalıklar BH, kullandığı ilaçlar Kİ olarak da alınır; planlanan ameliyat ayrı tutulur. Yakalama için Vizit Sade açıkken FONET anestezi formunu açıp kaydı seçmek gerekir; bütün hastaların formunu otomatik sorgulayan bir endpoint bu sürümde doğrulanmamıştır.
+Güncel sürüm: **V1.19**
 
 V1.19: Laboratuvar taraması son 45 günle sınırlıdır. Kabul listesi en yeniden eskiye taranır; 45 gün sınırına ulaşılınca sonraki sayfalar ve eski tüpler sorgulanmaz. Marker bulunmazsa sınırsız geçmiş sorgusu yapılmaz. Son 45 günde sonucu olmayan tümör markerleri `—` olarak gösterilir; önceki taramadan kalmış eski sonuçlar temizlenir.
 

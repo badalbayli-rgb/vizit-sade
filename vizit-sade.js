@@ -1,7 +1,9 @@
 (() => {
-  const APP_VERSION = "1.13";
+  const APP_VERSION = "1.14";
   /********************************************************************
-   * VİZİT SADE V1.13 KLİNİK PANEL
+   * VİZİT SADE V1.14 KLİNİK PANEL
+   * - V1.14: FONET Hasta Geçmişi getSevkList sorgusuyla ilk yatış bulunur;
+   *   nakil öncesi konsültasyonlar aynı yatış sürecine dahil edilir.
    * - V1.13: Ek görüntülemeler, drenaj/kolanjiografi raporu, kan ürünü takibi,
    *   kesintisiz ilk yatış, ikinci sırada GC 6 ve Order üstünde Klinik İzlem.
    * - V1.12: Dünkü DOCX okunurken Word/Google Docs exportu kilitlenir; tanıların
@@ -3571,7 +3573,7 @@ ${consults || "-"}
 
   function continuousAdmissionRows(p, rows) {
     const visit = (row) => clean(row.hastaGelis?.id || row.hastaGelisId);
-    const endDate = (row) => row.sevkBitisTarihi || row.ayrilisTarihi || row.cikisTarihi || row.taburcuTarihi || row.bitisTarihi || row.klinik?.cikisTarihi || "";
+    const endDate = (row) => row.klinik?.cikisTarihi || row.klinik?.taburcuTarihi || row.sevkBitisTarihi || row.ayrilisTarihi || row.cikisTarihi || row.taburcuTarihi || row.bitisTarihi || "";
     const unit = (row) => searchNorm(clean(row.birim?.adi || row.yatak?.oda?.birim?.adi || row.klinik?.yatak?.oda?.birim?.adi || row.servis?.adi || row.birimAdi || row.servisAdi));
     const discharged = (row) => /exitus|olum|eve\s*cikis|taburcu/.test(searchNorm(clean(
       row.cikisSekli?.adi || row.taburcuSekli?.adi || row.durum?.adi || ""
@@ -3581,7 +3583,8 @@ ${consults || "-"}
       .filter((row) => {
         const patient = clean(row.hastaGelis?.hasta?.id || row.hastaId || row.hasta?.id);
         return (!patient || !p.hastaId || patient === clean(p.hastaId)) && parseTrDate(admissionRowStart(row)) &&
-          (row.klinik || row.yatisTarihi || /cerrahi|yogun\s*bakim|\bybu\b|ameliyat|acil|servis|yatak/.test(unit(row)));
+          (parseTrDate(row.klinik?.yatisTarihi || row.yatisTarihi) || Number(row.sevkTipi) === 2 ||
+            (!/kons|muayene|poliklinik/.test(unit(row)) && /cerrahi|yogun\s*bakim|\bybu\b|ameliyat|acil|servis|yatak/.test(unit(row))));
       }).sort((a, b) => parseTrDate(admissionRowStart(b)) - parseTrDate(admissionRowStart(a)));
     const current = unique.find((row) => clean(row.id || row.birimSevkId || row.hastaBirimSevkId) === clean(p.birimSevkId)) ||
       unique.find((row) => visit(row) === clean(p.hastaGelisId));
@@ -3598,7 +3601,7 @@ ${consults || "-"}
       // Farklı gelişlerde yalnız bitişi nakille örtüşen hareketleri birleştir.
       // Bitişi olmayan eski bir yoğun bakım kaydı yeni yatışa bağlanmamalı.
       const gap = earliest - (end || stamp);
-      if (!sameVisit && (gap < -86400000 || gap > 86400000)) break;
+      if (!sameVisit && (gap < -86400000 || gap > 86400000)) continue;
       chain.push(row);
       earliest = stamp;
       previous = row;
@@ -3611,12 +3614,32 @@ ${consults || "-"}
     try {
       const rows = [];
       const failures = [];
+      // Canlı FONET Hasta Geçmişi ekranının kullandığı sorgu.
+      if (p.hastaId) {
+        try {
+          for (let page = 1; page <= 10; page += 1) {
+            const data = await apiJson("/Hasta/HastaGecmis/getSevkList", {
+              filter:JSON.stringify([
+                { property:"hastaGelis.hasta.id", value:Number(p.hastaId), type:"Long", operator:"=" },
+                { property:"tumHastane", value:1, type:"Long", operator:"=" }
+              ]),
+              page, start:(page - 1) * 100, limit:100,
+              sort:JSON.stringify([{ property:"sevkTarihi", direction:"DESC" }])
+            });
+            if (data.success === false || data.success === "false") throw new Error(data.message || data.msg || "Hasta geçmişi alınamadı");
+            const batch = Array.isArray(data.data) ? data.data : data.data?.rows || [];
+            rows.push(...batch);
+            const total = Number(data.total || data.totalCount || 0);
+            if (batch.length < 100 || total && page * 100 >= total) break;
+          }
+        } catch (e) { failures.push('Hasta geçmişi: ' + e.message); }
+      }
       const scopes = [
         { property:"hastaGelis.id", value:p.hastaGelisId },
         ...(p.hastaId ? [{ property:"hastaGelis.hasta.id", value:p.hastaId }, { property:"hasta.id", value:p.hastaId },
           { property:"birimSevk.hastaGelis.hasta.id", value:p.hastaId }] : [])
       ];
-      for (const scope of scopes) {
+      for (const scope of continuousAdmissionRows(p, rows).length ? [] : scopes) {
         try {
           const data = await apiJson("/Tibbi/HastaBirimSevk/getKayitList", {
             filterMap:"",
@@ -3635,6 +3658,8 @@ ${consults || "-"}
         p.yatis = admissionRowStart(chain[0]);
         p.admissionHistory = chain;
         p.admissionHistoryResolved = true;
+      } else {
+        throw new Error("İlk yatış doğrulanamadı; konsültasyonlar son servis nakline göre daraltılmadı.");
       }
     } catch (e) {
       p.errors = p.errors || [];
@@ -3701,8 +3726,18 @@ ${consults || "-"}
       await fetchSevkInfo(p);
     }
     if (!p.hastaGelisId) throw new Error("hastaGelisId bulunamadı");
-    const data = await apiJson(`/Poliklinik/Poliklinik/getHastaGelisKonsultasyonList/${p.hastaGelisId}/1`);
-    p.consults = (data.data || []).slice(0, 50).map((x) => {
+    const visits = [...new Set([p.hastaGelisId, ...(p.admissionHistory || [])
+      .map((row) => row.hastaGelis?.id || row.hastaGelisId)].map(clean).filter(Boolean))];
+    const rows = [];
+    const failures = [];
+    for (const visit of visits) {
+      try {
+        const data = await apiJson(`/Poliklinik/Poliklinik/getHastaGelisKonsultasyonList/${visit}/1`);
+        if (data.success === false || data.success === "false") throw new Error(data.message || data.msg || "Konsültasyon alınamadı");
+        rows.push(...(data.data || []));
+      } catch (e) { failures.push(e.message); }
+    }
+    const consults = rows.map((x) => {
       const answer = consultAnswerText(x);
       return {
         id: x.id,
@@ -3719,6 +3754,14 @@ ${consults || "-"}
         answered: Boolean(answer)
       };
     });
+    const unique = new Map();
+    [...(failures.length ? p.consults || [] : []), ...consults].forEach((row) => {
+      const key = clean(row.id) || [row.date, row.unit, row.request].join("|");
+      const old = unique.get(key);
+      if (!old || !old.answer || row.answer && (parseTrDate(row.answerDate) || 0) >= (parseTrDate(old.answerDate) || 0)) unique.set(key, row);
+    });
+    p.consults = [...unique.values()].sort((a, b) => parseTrDate(b.date) - parseTrDate(a.date));
+    if (failures.length) throw new Error(failures.join('; '));
   }
 
   async function fetchRadiologyReportText(reportId) {
@@ -6202,7 +6245,8 @@ ${consults || "-"}
   }
 
   function aoeRecentConsults(p) {
-    const admission = parseTrDate(p.yatis || p.admission || p.yatisTarihi || "");
+    // Servis nakli ilk yatış değildir. Geçmiş doğrulanmadan bu tarihle kons silme.
+    const admission = p.admissionHistoryResolved ? parseTrDate(p.yatis || "") : 0;
     return (p.consults || []).filter((x) => {
       const value = x.date || x.tarih || x.requestDate || x.istemTarihi;
       const stamp = parseTrDate(value);
@@ -6506,7 +6550,7 @@ ${consults || "-"}
       const value = clean(label), when = clean(date);
       if (!value) return;
       const stamp = parseTrDate(when);
-      if (admission && (!stamp || stamp < admission)) return;
+      if (group !== 0 && admission && (!stamp || stamp < admission)) return;
       const key = [group, norm(value), shortDate(when)].join("|");
       if (!events.some((x) => x.key === key)) events.push({ key, group, label:value, date:when });
     };

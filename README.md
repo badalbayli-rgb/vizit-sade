@@ -1,6 +1,8 @@
 # Vizit Sade
 
-Güncel sürüm: **V1.13**
+Güncel sürüm: **V1.14**
+
+V1.14: İlk yatış için canlı FONET Hasta Geçmişi ekranında doğrulanan `/Hasta/HastaGecmis/getSevkList` sorgusu kullanılır. Son servis naklinden önceki konsültasyonlar aynı kesintisiz yatış içinde korunur; farklı hasta gelişlerinin konsültasyonları birleştirilir ve 50 kayıt sınırı uygulanmaz. İlk yatış doğrulanamazsa uyarı gösterilir ve konsültasyonlar son nakil tarihiyle elenmez; son bir takvim ayı sınırı korunur.
 
 Fonet Canlı Vizit'in çalışan hasta toplama ve ayrıntı çekme altyapısını temel alan; yoğun servis vizitine uygun kompakt klinik panel ve toplu Word/Google Docs çıktısı sunan bağımsız tarayıcı betiği.
 
@@ -48,7 +50,7 @@ Google Docs seçeneği biçimi koruyan DOCX dosyasını indirir ve Google Drive'
 - Klinik İzlem: Order üstünde kalın başlık altında yatış sonrası en son klinik izlem kaydı
 - Gözlem: en güncel hemşire devir notu
 - Tarihli görüntüleme ve konsültasyon bölümleri
-- Exportta konsültasyonlar hem son bir takvim ayıyla hem de hastanın yatış tarih-saatinden sonrasıyla sınırlandırılır.
+- Exportta konsültasyonlar son bir takvim ayıyla ve doğrulanmış ilk yatış tarih-saatinden sonrasıyla sınırlandırılır. İlk yatış çözümlenememişse servis nakli filtre sınırı yapılmaz.
 - Görüntülemeler son 45 günle sınırlandırılır; abdomen USG yanında hepatobilier USG de ayrıntılı gösterilir.
 - Ayrıntılı Görüntüleme bölümünde alt/üst/tüm abdomen BT, toraks BT, kontrastlı boyun BT, yüzeyel doku USG, abdomen ve hepatobilier USG, tüm Doppler US/RDUS, PET-CT, dinamik karaciğer/pankreas incelemeleri, MRCP, ERCP, EUS, PTK, özefagoskopi, kolonoskopi, rektoskopi ve sigmoidoskopi gösterilir. Perkütan safra kesesi drenajı hem Görüntüleme hem Takip bölümünde yer alır; drenajın kolanjiografi bulguları ve dinamik pankreas BT raporu sonuç dahil korunur.
 - BT raporlarında `SONUÇ:` başlığından önceki metin; ERCP ve EUS raporlarında yalnızca `SONUÇ:` bölümü yazılır.

@@ -94,6 +94,18 @@ test('Resolved first admission excludes earlier stays while retaining pre-transf
     {unit:'Önceki yatış', date:'01.10.2026 10:00', answer:'Yanıt'}]};
   assert.equal(run('aoeRecentConsults(patient).length'), 2);
 });
+test('Consultation displays select the latest ten after applying admission and date filters', () => {
+  context.patient = {yatis:'03.10.2026', admissionHistoryResolved:true, consults:[
+    ...Array.from({length:15}, (_,i)=>({id:i+1, unit:'Kons '+(i+1), answer:'Yanıt', date:`${String(i+4).padStart(2,'0')}.10.2026`})),
+    {id:99, date:'01.10.2026'}, {id:100, date:'01.09.2026'}]};
+  const before = JSON.stringify(context.patient.consults);
+  assert.equal(run('aoeRecentConsults(patient).length'), 10);
+  assert.equal(run('aoeRecentConsults(patient)[0].id'), 15);
+  assert.equal(run('aoeRecentConsults(patient)[9].id'), 6);
+  assert.equal(run('aoeFollowEvents(patient).filter(x=>x.group===0).length'), 10);
+  assert.equal(run('latestConsults(patient.consults).length'), 10);
+  assert.equal(JSON.stringify(context.patient.consults), before);
+});
 test('Clinic order adds GC6 in second place and preserves remaining priorities', () => {
   const names = ['Acil Genel Cerrahi', 'Genel Cerrahi 6', 'Genel Cerrahi 1', 'Genel Cerrahi 2',
     'Gastroenterolojik ve Onkolojik Cerrahi', 'Genel Cerrahi 3', 'Genel Cerrahi 4', 'Diğer Klinik', 'Yoğun Bakım'];

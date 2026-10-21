@@ -1,7 +1,8 @@
 (() => {
-  const APP_VERSION = "1.14";
+  const APP_VERSION = "1.15";
   /********************************************************************
-   * VİZİT SADE V1.14 KLİNİK PANEL
+   * VİZİT SADE V1.15 KLİNİK PANEL
+   * - V1.15: Konsültasyon gösterimleri en güncel 10 kayıtla sınırlandırılır.
    * - V1.14: FONET Hasta Geçmişi getSevkList sorgusuyla ilk yatış bulunur;
    *   nakil öncesi konsültasyonlar aynı yatış sürecine dahil edilir.
    * - V1.13: Ek görüntülemeler, drenaj/kolanjiografi raporu, kan ürünü takibi,
@@ -3089,7 +3090,7 @@
     const doctorCode = doctorInitials(p.doktor);
     const meta = extractCardMeta(p);
     const postop = operationBadge(p);
-    const consults = (p.consults || [])
+    const consults = latestConsults(p.consults)
       .filter((x) => x.answer || x.unit)
       .map((x) => `(${shortDate(x.date) || "-"}) ${x.unit || "Kons"}${x.answer ? ":\n" + x.answer : ""}`)
       .join("\n");
@@ -3132,7 +3133,7 @@ ${consults}
     const doctorCode = doctorInitials(p.doktor);
     const meta = extractCardMeta(p);
     const postop = operationBadge(p);
-    const consults = (p.consults || [])
+    const consults = latestConsults(p.consults)
       .filter((x) => x.answer || x.unit)
       .map((x) => `(${shortDate(x.date) || "-"}) ${x.unit || "Kons"}${x.answer ? ":\n" + x.answer : ""}`)
       .join("\n");
@@ -3280,7 +3281,7 @@ ${consults}
   function fullVisitText(p) {
     const doctorCode = doctorInitials(p.doktor);
     const meta = extractCardMeta(p);
-    const consults = (p.consults || []).map((x) => {
+    const consults = latestConsults(p.consults).map((x) => {
       const answer = x.answer ? `\n${x.answer}` : "";
       return `(${shortDate(x.date) || "-"}) ${x.unit || "Kons"}${answer}`;
     }).join("\n---\n");
@@ -3375,7 +3376,7 @@ ${consults || "-"}
           ${detailBlock("Diyet", `Kart:${dietInfo.code}${dietInfo.extra ? "\nEk:" + dietInfo.extra : ""}\nHam:${p.diyet || "-"}`)}
           ${detailBlock("Lab", labLine(p.labs) || "-")}
           ${detailBlock("Order", (p.orders || []).map((x) => `${x.name} ${x.dose}`).join("\n") || "-")}
-          ${detailBlock("Konsültasyon", (p.consults || []).map((x) => `${x.unit || "Kons"}\n${x.answer || x.request || "-"}`).join("\n---\n") || "-")}
+          ${detailBlock("Konsültasyon", latestConsults(p.consults).map((x) => `${x.unit || "Kons"}\n${x.answer || x.request || "-"}`).join("\n---\n") || "-")}
           ${detailBlock("Vitaller", formatVitals(p.vitals, 10) || "-")}
           ${detailBlock("Hemşire / Devir", (p.nursing || []).map((x) => `${x.date || ""}\n${x.text || ""}`).join("\n---\n") || "-")}
           ${detailBlock("Radyoloji", formatRadiology(p.radiology, 12, 1200) || "-")}
@@ -5452,7 +5453,7 @@ ${consults || "-"}
           ${detailBlockV16("Lab", `Tarih:${p.labDate || "-"}\n${labLine(p.labs) || "-"}`, t, "L")}
           ${p.glucoseChecks?.length ? detailBlockV16("Glukotest", glucoseCheckText(p, 12), t, "G") : ""}
           ${detailBlockV16("Görüntüleme", formatRadiology(p.radiology, 12, 1200) || "-", t, "G")}
-          ${detailBlockV16("Konsültasyon", (p.consults || []).map((x) => `${x.unit || "Kons"}${x.date ? " | " + x.date : ""}\n${x.answer || x.request || "-"}`).join("\n---\n") || "-", t, "K")}
+          ${detailBlockV16("Konsültasyon", latestConsults(p.consults).map((x) => `${x.unit || "Kons"}${x.date ? " | " + x.date : ""}\n${x.answer || x.request || "-"}`).join("\n---\n") || "-", t, "K")}
           ${detailBlockV16("Order", (p.orders || []).map((x) => `${x.name} ${x.dose}`).join("\n") || "-", t, "Rx")}
           ${detailBlockV16("Hemşire / Devir", (p.nursing || []).map((x) => `${x.date || ""}\n${x.text || ""}`).join("\n---\n") || "-", t, "N")}
           ${p.errors?.length ? detailBlockV16("Hatalar", p.errors.join("\n"), t, "!") : ""}
@@ -6244,14 +6245,19 @@ ${consults || "-"}
     return Boolean(stamp && stamp >= aoeOneMonthCutoff(new Date(nowMs)) && stamp <= nowMs + 86400000);
   }
 
+  function latestConsults(rows = []) {
+    const date = (row) => parseTrDate(row.date || row.tarih || row.requestDate || row.istemTarihi) || 0;
+    return rows.slice().sort((a, b) => date(b) - date(a)).slice(0, 10);
+  }
+
   function aoeRecentConsults(p) {
     // Servis nakli ilk yatış değildir. Geçmiş doğrulanmadan bu tarihle kons silme.
     const admission = p.admissionHistoryResolved ? parseTrDate(p.yatis || "") : 0;
-    return (p.consults || []).filter((x) => {
+    return latestConsults((p.consults || []).filter((x) => {
       const value = x.date || x.tarih || x.requestDate || x.istemTarihi;
       const stamp = parseTrDate(value);
       return aoeWithinLastMonth(value) && (!admission || (stamp && stamp >= admission));
-    });
+    }));
   }
 
   function aoeWithinLastDays(value, days, nowMs = Date.now()) {

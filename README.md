@@ -1,6 +1,8 @@
 # Vizit Sade
 
-Güncel sürüm: **V1.14**
+Güncel sürüm: **V1.15**
+
+V1.15: Hasta ayrıntıları, vizit metni, Takip ve Word/Google Docs çıktılarında en güncel en fazla 10 konsültasyon gösterilir. Önce yatış ve tarih filtreleri uygulanır, ardından en güncel 10 kayıt seçilir; nakil öncesi konsültasyonları koruyan düzeltme devam eder.
 
 V1.14: İlk yatış için canlı FONET Hasta Geçmişi ekranında doğrulanan `/Hasta/HastaGecmis/getSevkList` sorgusu kullanılır. Son servis naklinden önceki konsültasyonlar aynı kesintisiz yatış içinde korunur; farklı hasta gelişlerinin konsültasyonları birleştirilir ve 50 kayıt sınırı uygulanmaz. İlk yatış doğrulanamazsa uyarı gösterilir ve konsültasyonlar son nakil tarihiyle elenmez; son bir takvim ayı sınırı korunur.
 

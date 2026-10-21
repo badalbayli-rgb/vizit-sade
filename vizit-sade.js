@@ -1,7 +1,8 @@
 (() => {
-  const APP_VERSION = "1.19";
+  const APP_VERSION = "1.20";
   /********************************************************************
-   * VİZİT SADE V1.19 KLİNİK PANEL
+   * VİZİT SADE V1.20 KLİNİK PANEL
+   * - V1.20: ASA Roma rakamı/alan adı ve seçili postop yer ayrıştırması.
    * - V1.19: Laboratuvar ve tümör markerleri için son 45 gün sınırı.
    * - V1.18: İzotonik hacimleri ve sayfalı laboratuvar kabul geçmişi.
    * - V1.17: İnfüzyon/OKSAPAR kısa adları, metronidazol torbası ve CA ad eşleştirmesi.
@@ -597,7 +598,7 @@
       const preserved = { ...merged };
       Object.assign(merged, p, { key });
       if (incomingKeys.has(key)) merged.seenInServiceAt = seenNow;
-      ["birimSevkId", "hastaGelisId", "hastaId", "protokol", "kimlikNo", "doktor", "birim", "yas", "cinsiyet", "tani", "alerji", "asa", "diyet", "diyetId", "uzmanlikKodu", "diyetAraOgun", "knownDiseases", "homeMeds", "plannedOperation", "postopPlace"].forEach((field) => {
+      ["birimSevkId", "hastaGelisId", "hastaId", "protokol", "kimlikNo", "doktor", "birim", "yas", "cinsiyet", "tani", "alerji", "asa", "diyet", "diyetId", "uzmanlikKodu", "diyetAraOgun", "knownDiseases", "homeMeds", "previousOperations", "plannedOperation", "postopPlace"].forEach((field) => {
         if (!merged[field] && preserved[field]) merged[field] = preserved[field];
       });
       for (const field of ["labs", "glucoseChecks", "vitals", "consults", "orders", "nursing", "radiology", "surgeries", "anesthesia", "errors"]) {
@@ -916,7 +917,7 @@
     try {
       const data = JSON.parse(responseText);
       const info = extractAnesthesiaInfo(data);
-      if (!info || !["asa", "knownDiseases", "homeMeds", "plannedOperation", "destination"].some((field) => info[field])) return false;
+      if (!info || !["asa", "knownDiseases", "homeMeds", "previousOperations", "plannedOperation", "destination"].some((field) => info[field])) return false;
 
       const patient = findPatientForAnesthesiaData(data, info);
       if (!patient) {
@@ -1913,7 +1914,7 @@
   }
 
   function normalizeAsa(value) {
-    const raw = clean(value).toLocaleUpperCase("tr-TR");
+    const raw = clean(value).normalize("NFKC").toUpperCase().replace(/İ|ı/g, "I");
     const digit = raw.match(/\b([1-5])\b/)?.[1];
     if (digit) return digit;
     const roman = raw.match(/\b(IV|III|II|I|V)\b/)?.[1];
@@ -1921,10 +1922,16 @@
   }
 
   function extractAsa(root) {
+    for (const pair of formLabeledValues(root)) {
+      if (!/^asa(?:skoru|score|sinifi|degeri|puani)?$/.test(searchNorm(pair.label).replace(/[^a-z]/g, ""))) continue;
+      const asa = normalizeAsa(pair.value);
+      if (asa) return asa;
+    }
     const leaves = formLeaves(root);
     for (const leaf of leaves) {
       const hay = searchNorm(`${leaf.path} ${leaf.key} ${leaf.value}`);
-      if (!/\basa\b/.test(hay)) continue;
+      const field = searchNorm(leaf.key).replace(/[^a-z]/g, "");
+      if (!/\basa\b/.test(hay) && !/^asa(?:skor(?:u)?|score|sinif(?:i)?|deger(?:i)?|puan(?:i)?)$/.test(field)) continue;
       const value = normalizeAsa(leaf.value) || (isCheckedValue(leaf.raw) ? normalizeAsa(leaf.path) : "");
       if (value) return value;
     }
@@ -1942,7 +1949,7 @@
   function extractPostopDestination(root) {
     const out = [];
     const addDest = (text) => {
-      const hay = searchNorm(text);
+      const hay = searchNorm(String(text).replace(/([a-z])([A-Z])/g, "$1 $2"));
       if (/pacu/.test(hay)) addUnique(out, "PACU");
       if (/\bybu\b|yogun bakim|yoğun bakım/.test(hay)) addUnique(out, "YBÜ");
       if (/\bklinik\b|servis/.test(hay)) addUnique(out, "Klinik");
@@ -1950,11 +1957,15 @@
 
     const leaves = formLeaves(root);
     leaves.forEach((leaf) => {
-      const hay = searchNorm(`${leaf.path} ${leaf.key} ${leaf.value}`);
+      const hay = searchNorm(`${leaf.path} ${leaf.key} ${leaf.value}`.replace(/([a-z])([A-Z])/g, "$1 $2"));
       if (!/(pacu|\bybu\b|yogun bakim|klinik|servis)/.test(hay)) return;
       if (/fieldinfo|caption|postoperatifsolunum/.test(hay)) return;
-      if (isCheckedValue(leaf.raw) || /(postop|ameliyat sonrasi|takip yeri|gidecegi yer|gidecegi birim|gidecegi servis).*(pacu|\bybu\b|yogun bakim|klinik|servis)/.test(hay)) {
-        addDest(hay);
+      if (isCheckedValue(leaf.raw)) {
+        addDest(leaf.key + " " + leaf.value);
+      } else if (typeof leaf.raw === "string" &&
+        /postop|ameliyat.?sonrasi|takip.?yeri|gidecegi|destination/.test(searchNorm(leaf.path)) &&
+        !/^(false|hayir|yok|0|off|unchecked)$/.test(searchNorm(leaf.value))) {
+        addDest(leaf.value);
       }
     });
 
@@ -1979,6 +1990,7 @@
     const knownDiseases = firstFormField(root, /bilinen.*hastalik|ek.*hastalik|yandas.*hastalik|sistemik.*hastalik|ozgecmis|komorbid/, 120);
     const homeMeds = firstFormField(root, /kullandigi.*ilac|kullandığı.*ilaç|ev.*ilac|ilac.*kullanimi|ilaclar/, 120);
     const plannedOperation = firstFormField(root, /planlanan.*ameliyat|yapilacak.*ameliyat|ameliyat.*adi|operasyon.*adi|cerrahi.*islem/, 120);
+    const previousOperations = firstFormField(root, /gecirilmis.*(?:operasyon|ameliyat|cerrahi)|gecmis.*(?:operasyon|ameliyat)|onceki.*(?:operasyon|ameliyat)|operasyon.*oyku|ameliyat.*oyku|cerrahi.*ozgecmis|previous.*(?:operation|surg)|past.*surg/, 180);
     const asa = extractAsa(root);
     const destination = extractPostopDestination(root);
     const rawText = clip(cleanMultiline(formObjectText(root)), 1500);
@@ -1986,6 +1998,7 @@
       asa,
       knownDiseases,
       homeMeds,
+      previousOperations,
       plannedOperation,
       destination,
       rawText
@@ -2032,6 +2045,7 @@
     if (info.asa) p.asa = info.asa;
     if (info.knownDiseases) p.knownDiseases = info.knownDiseases;
     if (info.homeMeds) p.homeMeds = info.homeMeds;
+    if (info.previousOperations) p.previousOperations = info.previousOperations;
     if (info.plannedOperation) p.plannedOperation = info.plannedOperation;
     if (info.destination) p.postopPlace = info.destination;
   }
@@ -2755,10 +2769,8 @@
       /ev ilaç(?:ları)?\s*[:\-]\s*([^\n]+)/i
     ]);
     const go =
-      p.plannedOperation ||
-      anesthesia.plannedOperation ||
-      extractInlineValue(text, [/G[ÖO]\s*[:\-]\s*([^\n]+)/i, /ameliyat\s*[:\-]\s*([^\n]+)/i, /operasyon\s*[:\-]\s*([^\n]+)/i]) ||
-      (text.match(/kolesistektomi|apendektomi|ileostomi|kolostomi|laparotomi|debridman|ERCP|stent|rezeksiyon/i)?.[0] || "");
+      p.previousOperations || anesthesia.previousOperations ||
+      extractInlineValue(text, [/G[ÖO]\s*[:\-]\s*([^\n]+)/i, /geçirilmiş (?:ameliyat|operasyon)(?:lar[ıi]?)?\s*[:\-]\s*([^\n]+)/i]);
     const destination = p.postopPlace || anesthesia.destination || "";
     const plan =
       extractInlineValue(text, [/plan\s*[:\-]\s*([^\n]+)/i, /karar\s*[:\-]\s*([^\n]+)/i]) ||
@@ -4613,6 +4625,7 @@ ${consults || "-"}
       asa: p.asa,
       knownDiseases: p.knownDiseases,
       homeMeds: p.homeMeds,
+      previousOperations: p.previousOperations,
       plannedOperation: p.plannedOperation,
       postopPlace: p.postopPlace,
       diyet: p.diyet,
@@ -4639,7 +4652,8 @@ ${consults || "-"}
       ["asa", "ASA güncellendi"],
       ["knownDiseases", "BH güncellendi"],
       ["homeMeds", "Kİ güncellendi"],
-      ["plannedOperation", "GO güncellendi"],
+      ["previousOperations", "GO güncellendi"],
+      ["plannedOperation", "Planlanan ameliyat güncellendi"],
       ["postopPlace", "Yer güncellendi"],
       ["diyet", "Diyet güncellendi"],
       ["diyetAraOgun", "Diyet güncellendi"],
@@ -4709,11 +4723,12 @@ ${consults || "-"}
     if (labels.includes("Diyet güncellendi")) add("Diyet", [p.diyet, p.diyetAraOgun].filter(Boolean).join(" / "));
     if (labels.includes("Klinik izlem")) add("Klinik izlem", clip(after.clinical || "", 520));
     if (labels.includes("ASA güncellendi") || labels.includes("Anestezi formu")) {
-      add("Anestezi", [`ASA: ${p.asa || "-"}`, `BH: ${p.knownDiseases || "-"}`, `Kİ: ${p.homeMeds || "-"}`, `GO: ${p.plannedOperation || "-"}`].join("\n"));
+      add("Anestezi", [`ASA: ${p.asa || "-"}`, `BH: ${p.knownDiseases || "-"}`, `Kİ: ${p.homeMeds || "-"}`, `GO: ${p.previousOperations || "-"}`, `Yer: ${p.postopPlace || "-"}`].join("\n"));
     }
     if (labels.includes("BH güncellendi")) add("Bilinen hastalıklar", p.knownDiseases || "");
     if (labels.includes("Kİ güncellendi")) add("Kullandığı ilaçlar", p.homeMeds || "");
-    if (labels.includes("GO güncellendi")) add("Planlanan ameliyat", p.plannedOperation || "");
+    if (labels.includes("GO güncellendi")) add("Geçirilmiş operasyon", p.previousOperations || "");
+    if (labels.includes("Planlanan ameliyat güncellendi")) add("Planlanan ameliyat", p.plannedOperation || "");
     if (labels.includes("Yer güncellendi")) add("Planlanan yer", p.postopPlace || "");
     if (labels.includes("Ameliyat")) add("Ameliyat", (after.surgeries || []).slice(0, 3).map((x) => [x.name, x.startDate || x.requestDate].filter(Boolean).join(" | ")).join("\n"));
     return parts.join("\n\n");
@@ -5304,7 +5319,8 @@ ${consults || "-"}
       ["KI", meta.ki],
       ["GO", meta.go],
       ["Alerji", meta.allergy],
-      ["ASA", meta.asa]
+      ["ASA", meta.asa],
+      ...(meta.destination ? [["Yer", meta.destination]] : [])
     ];
     const chips = [
       operation ? statusPill(operation, t.primary2, t.tile, t.primary2) : "",
@@ -6686,7 +6702,7 @@ ${consults || "-"}
       surgeryDate: clean(surgery.date || ""),
       bh: aoeSanitizeKnownDiseases(clean(meta.bh || p.knownDiseases || consultFacts.bh || ""), p),
       ki: clean(meta.ki || p.homeMeds || consultFacts.ki || ""),
-      go: clean(meta.go || p.plannedOperation || consultFacts.go || "")
+      go: clean(meta.go || p.previousOperations || consultFacts.go || "")
     };
   }
 
@@ -6870,8 +6886,20 @@ ${consults || "-"}
       '<div><b>Gözlem:</b>' + nursing + '</div><div class="section-gap">&nbsp;</div>' +
       '<div><b>Takip:</b>' + (clinical || "—") + '</div><div class="section-gap">&nbsp;</div>' +
       '<div><b>Konsültasyonlar:</b>' + consults + '</div><div class="section-gap">&nbsp;</div>' +
+      '<div class="anesthesia"><b>Anestezi:</b><br>' + aoeAnesthesiaLines(p).map(aoeEsc).join('<br>') + '</div><div class="section-gap">&nbsp;</div>' +
       '<div class="imaging"><b>Görüntüleme:</b>' + imaging + '</div><div class="section-gap">&nbsp;</div>' +
       '</section><div class="patient-gap">&nbsp;<br>&nbsp;</div>';
+  }
+
+  function aoeAnesthesiaLines(p) {
+    const form = p.anesthesia || {};
+    return [
+      ["ASA", form.asa || p.asa],
+      ["POST-OP yer", form.destination || p.postopPlace],
+      ["Geçirilmiş operasyonlar", form.previousOperations || p.previousOperations],
+      ["Ek hastalıklar", form.knownDiseases || p.knownDiseases],
+      ["Kullandığı ilaçlar", form.homeMeds || p.homeMeds]
+    ].map(([label, value]) => label + ": " + (clean(value) || "—"));
   }
 
   function aoeSplitColumns(patients) {
@@ -7112,6 +7140,9 @@ ${consults || "-"}
       if (index < answeredConsults.length - 1) paragraphs.push(aoeWordParagraph("", { size:9 }));
     });
     if (!answeredConsults.length) paragraphs.push(aoeWordParagraph("—", { size:9 }));
+    paragraphs.push(aoeWordParagraph("", { size:9 }));
+    paragraphs.push(aoeWordParagraph("Anestezi:", { size:9, bold:true, keep:true }));
+    aoeAnesthesiaLines(p).forEach((line) => paragraphs.push(aoeWordParagraph(line, { size:9 })));
     paragraphs.push(aoeWordParagraph("", { size:9 }));
     paragraphs.push(aoeWordParagraph("Görüntüleme:", { size:9, bold:true, keep:true }));
     const namedImaging = aoeRecentImaging(p).filter((x) => aoeImagingName(x));

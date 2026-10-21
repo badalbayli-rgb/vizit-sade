@@ -17,6 +17,34 @@ const run = code => vm.runInContext(code, context);
 const originalApiJson = run('apiJson');
 let count = 0;
 function test(name, fn) { fn(); count++; console.log('PASS ' + name); }
+test('ASA scores support Roman numerals, Turkish casing, camelCase and labeled form fields', () => {
+  for (const form of [{asaSkoru:'III'},{asaSkoru:'ııı'},{asaSkoru:'Ⅲ'},
+    {alanlar:[{label:'Asa Skoru',value:'III'}]},{asa_skoru:'3'}]) {
+    context.form=form; assert.equal(run('extractAnesthesiaInfo(form).asa'),'3');
+  }
+});
+test('Postop destination includes only selected clinic, PACU and ICU fields', () => {
+  for(const [form,expected] of [
+    [{postopKlinik:false,postopPacu:true,postopYogunBakim:false},'PACU'],
+    [{postopKlinik:'false',postopPacu:'0',postopYogunBakim:true},'YBÜ'],
+    [{postopKlinik:true,postopPacu:false,postopYogunBakim:false},'Klinik'],
+    [{postopGidecegiYer:'PACU'},'PACU'],
+    [{alanlar:[{label:'Klinik',checked:false},{label:'Pacu',checked:true},{label:'Yoğun Bakım',checked:false}]},'PACU']]) {
+    context.form=form;assert.equal(run('extractAnesthesiaInfo(form).destination'),expected);
+  }
+});
+test('Anesthesia history, home medicines and previous operations remain distinct from planned surgery', () => {
+  context.form={asaSkoru:'III',ekHastaliklar:'HT, DM',kullandigiIlaclar:'Örnek ilaç',
+    gecirilmisOperasyonlar:'Apendektomi',planlananAmeliyat:'Herni onarımı',postopPacu:true};
+  context.patient={};run('applyAnesthesiaInfo(patient,extractAnesthesiaInfo(form))');
+  assert.equal(context.patient.previousOperations,'Apendektomi');
+  assert.equal(context.patient.knownDiseases,'HT, DM');
+  assert.equal(context.patient.homeMeds,'Örnek ilaç');
+  assert.equal(context.patient.plannedOperation,'Herni onarımı');
+  assert.equal(run('extractCardMeta(patient).go'),'Apendektomi');
+  context.patient={plannedOperation:'Herni onarımı'};
+  assert.equal(run('extractCardMeta(patient).go'),'');
+});
 test('Infusion names retain volume and Oksapar units while metronidazole brands collapse', () => {
   for (const [name, expected] of [
     ['TURKFLEKS DENGELİ ELEKTROLİT 1000 ML SOLÜSYONU PVC (SETSİZ)', 'DENGELİ 1000'],
@@ -226,6 +254,17 @@ test('HTML and Word put bold clinical heading above Order and outside Takip', ()
   }
   assert.ok(html.includes('<b>Klinik İzlem:</b>'));
   assert.match(xml, /<w:b\/>[^]*?Klinik İzlem:/);
+});
+test('HTML and Word place Anesthesia between consultations and imaging with all requested fields', () => {
+  context.patient={anesthesia:{asa:'3',destination:'PACU',previousOperations:'Apendektomi',
+    knownDiseases:'HT',homeMeds:'Örnek ilaç'}};
+  for(const text of [run('aoePatientHtml(patient)'),run('aoeWordPatient(patient)')]) {
+    assert.ok(text.indexOf('Konsültasyonlar:') < text.indexOf('Anestezi:'));
+    assert.ok(text.indexOf('Anestezi:') < text.indexOf('Görüntüleme:'));
+    const section=text.slice(text.indexOf('Anestezi:'),text.indexOf('Görüntüleme:'));
+    for(const value of ['ASA: 3','POST-OP yer: PACU','Geçirilmiş operasyonlar: Apendektomi',
+      'Ek hastalıklar: HT','Kullandığı ilaçlar: Örnek ilaç']) assert.ok(section.includes(value),value);
+  }
 });
 test('HTML and Word exports retain pre-transfer consultation answers and follow-up entries', () => {
   context.patient = {yatis:'03.10.2026', admissionHistoryResolved:true, consults:[

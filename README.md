@@ -1,6 +1,6 @@
 # Vizit Sade
 
-Güncel sürüm: **V1.12**
+Güncel sürüm: **V1.13**
 
 Fonet Canlı Vizit'in çalışan hasta toplama ve ayrıntı çekme altyapısını temel alan; yoğun servis vizitine uygun kompakt klinik panel ve toplu Word/Google Docs çıktısı sunan bağımsız tarayıcı betiği.
 
@@ -45,16 +45,16 @@ Google Docs seçeneği biçimi koruyan DOCX dosyasını indirir ve Google Drive'
 - Hasta başlığı: 15 pt
 - Görüntüleme/ana metin: 9 pt
 - Order satırı: ilaç adı ve başlangıç tarihi
-- Takip: tarihli klinik izlem kayıtları
+- Klinik İzlem: Order üstünde kalın başlık altında yatış sonrası en son klinik izlem kaydı
 - Gözlem: en güncel hemşire devir notu
 - Tarihli görüntüleme ve konsültasyon bölümleri
 - Exportta konsültasyonlar hem son bir takvim ayıyla hem de hastanın yatış tarih-saatinden sonrasıyla sınırlandırılır.
 - Görüntülemeler son 45 günle sınırlandırılır; abdomen USG yanında hepatobilier USG de ayrıntılı gösterilir.
-- Ayrıntılı Görüntüleme bölümünde alt/üst/tüm abdomen BT, toraks BT, abdomen ve hepatobilier USG, PET-CT, dinamik karaciğer/pankreas incelemeleri, MRCP, ERCP, EUS, PTK, özefagoskopi ve kolonoskopi gösterilir.
+- Ayrıntılı Görüntüleme bölümünde alt/üst/tüm abdomen BT, toraks BT, kontrastlı boyun BT, yüzeyel doku USG, abdomen ve hepatobilier USG, tüm Doppler US/RDUS, PET-CT, dinamik karaciğer/pankreas incelemeleri, MRCP, ERCP, EUS, PTK, özefagoskopi, kolonoskopi, rektoskopi ve sigmoidoskopi gösterilir. Perkütan safra kesesi drenajı hem Görüntüleme hem Takip bölümünde yer alır; drenajın kolanjiografi bulguları ve dinamik pankreas BT raporu sonuç dahil korunur.
 - BT raporlarında `SONUÇ:` başlığından önceki metin; ERCP ve EUS raporlarında yalnızca `SONUÇ:` bölümü yazılır.
-- Takip bölümünde yalnızca yatış tarihinden sonraki kayıtlar ve en son klinik izlem bulunur; bütün satırlar en güncel tarih en üstte olacak şekilde sıralanır ve konsültasyonlar `01.10 Kardiyoloji kons` biçiminde yalnız bölüm adıyla gösterilir.
+- Takip bölümünde yalnızca yatış tarihinden sonraki işlem kayıtları bulunur; klinik izlem ayrı başlık altındadır. Bütün satırlar en güncel tarih en üstte olacak şekilde sıralanır ve konsültasyonlar `01.10 Kardiyoloji kons` biçiminde yalnız bölüm adıyla gösterilir. Güncel ve geçmiş orderlardaki kan ürünleri adetleriyle `1 ES`, `2 TDP`, `3 TS` olarak yazılır; adet bilgisi yoksa sayı üretilmez.
 - Gastroenterolojik Cerrahi ile Cerrahi Onkoloji tek başlıkta birleştirilir ve hastalar oda numarasına göre sıralanır.
-- Export klinik sırası `Acil Genel Cerrahi → Genel Cerrahi 1 → Genel Cerrahi 2 → Gastroenterolojik ve Onkolojik Cerrahi → Genel Cerrahi 3 → Genel Cerrahi 4 → diğer klinikler` şeklindedir; yoğun bakım en sonda, `KONTROL` hastaları ise belgenin sonunda kalır.
+- Export klinik sırası `Acil Genel Cerrahi → Genel Cerrahi 6 → Genel Cerrahi 1 → Genel Cerrahi 2 → Gastroenterolojik ve Onkolojik Cerrahi → Genel Cerrahi 3 → Genel Cerrahi 4 → diğer klinikler` şeklindedir; yoğun bakım en sonda, `KONTROL` hastaları ise belgenin sonunda kalır.
 - Dünkü DOCX'te olup güncel FONET listesinde bulunmayan hastalar, özgün hasta blokları değiştirilmeden çıktının sonundaki `KONTROL` başlığında kırmızı korunur; satıra bölünmüş hasta başlıkları da tanınır.
 - Microsoft Word tarafından eklenen `w14` ve diğer OOXML ad alanlarını kullanan DOCX dosyalarındaki hasta blokları da tam olarak okunur ve `KONTROL` bölümüne taşınır.
 - Dünkü DOCX okunurken Word ve Google Docs düğmeleri kilitlenir; `YÜKLENDİ ✓` mesajı görünmeden export alınamadığı için eski belgedeki tanı ve diğer sabit alanların canlı FONET verisiyle değişmesi engellenir.
@@ -63,7 +63,7 @@ Google Docs seçeneği biçimi koruyan DOCX dosyasını indirir ve Google Drive'
 - EKG, PAAG, ADBG, BT, ERCP, PTK ve diğer tüm son 45 günlük görüntülemeler Takip'te yalnızca ad olarak listelenir.
 - Eski DOCX'te olup güncel FONET hasta listesinde olmayan hastalar belgenin en sonunda `KONTROL` başlığı altında kırmızı korunur.
 - Order başlangıcı, günlük yeniden giriş tarihi yerine kesintisiz yatış sürecindeki bütün servis/yoğun bakım sevkleri taranarak aynı ilacın ilk kez order edildiği tarih olarak gösterilir.
-- Yatış tarihi, taburculuk olmadan servis/yoğun bakım arasında yapılan nakillerde ilk yatış tarihidir; hasta yoğun bakımdan doğrudan servise geldiyse farklı hasta gelişi açılmış olsa bile yoğun bakım kabul tarihi kullanılır.
+- Yatış tarihi, taburculuk olmadan acil/ameliyathane/yoğun bakım/servis arasında yapılan nakillerde ilk yatış tarihidir. Farklı hasta gelişlerindeki ardışık hareketler de taranır; farklı gelişler arasında en fazla 24 saatlik geçiş aralığı kabul edilir. Eve çıkış/taburcu/exitus ile biten eski yatışlar birleştirilmez. Hareketlerden belirlenen tarih eski DOCX'teki servis yatış tarihinin önüne geçer.
 - CA 19-9, CA 125, CA 15-3, CA 72-4, CEA, AFP, PSA, NSE ve diğer desteklenen tümör belirteçlerinin hasta geçmişindeki en güncel değerleri, yeni sonuç çalışılmayan günlerde de Vital satırının altında sabit gösterilir.
 - Eski DOCX'ten eşleşen hastaların sabit alanları kilitli kalır. Yeni hastaların tanısında en son yanıtlanan Genel Cerrahi konsültasyonu, yoksa FONET tanı listesi kullanılır.
 - BH alanına `CA` yalnızca doğrulanmış kanser ifadesi varsa eklenir; "malignite/tümör izlenmedi" ve kalsiyum gibi kullanımlar CA sayılmaz.
@@ -73,4 +73,8 @@ Google Docs seçeneği biçimi koruyan DOCX dosyasını indirir ve Google Drive'
 
 ## Not
 
-Fonet kurulumları arasında endpoint ve alan adları değişebilir. Görüntüleme listesinin boş kalması halinde kurum sürümündeki RIS liste endpointi `fetchImaging` içindeki adaylara eklenmelidir.
+Fonet kurulumları arasında endpoint ve alan adları değişebilir. Görüntüleme listesinin boş kalması halinde kurum sürümündeki RIS liste endpointi `fetchRadiology` içinde kontrol edilmelidir. Kan ürünü takibi, alınan güncel/geçmiş order ve klinik izlem kayıtlarındaki istem bilgilerini kullanır; ayrı kan bankası modülü için doğrulanmış bir endpoint yoktur.
+
+## Doğrulama
+
+`node --check vizit-sade.js` ve `node tests/regression.cjs` ile sözdizimi ve örnek veri testleri çalıştırılır. Testler görüntüleme adlarını, raporların korunmasını, kan ürünü adetlerini, yatış zincirini, klinik sırasını ve HTML/Word yerleşimini kapsar. Canlı FONET bağlantısı ve gerçek hasta verisiyle uçtan uca doğrulama ayrıca gereklidir.

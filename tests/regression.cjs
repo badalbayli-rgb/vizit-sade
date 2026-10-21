@@ -31,6 +31,14 @@ test('Infusion names retain volume and Oksapar units while metronidazole brands 
     context.drug = name; assert.equal(run('aoeDrugName(drug)'), expected);
   }
 });
+test('Isotonic saline names retain the requested bag volume', () => {
+  for (const [name, expected] of [
+    ['SER. %0,9 İZOTONİK NACL 500ML SETLİ', 'İZOTONİK 500'],
+    ['SER. %0,9 İZOTONİK NACL 100 ML', 'İZOTONİK 100'],
+    ['İZOTONİK 100 ML SODYUM KLORÜR ÇÖZELTİSİ %0.9 PVC SETLİ', 'İZOTONİK 100']]) {
+    context.drug=name; assert.equal(run('aoeDrugName(drug)'), expected);
+  }
+});
 test('Metronidazole infusion bags stay in visit orders without relaxing transfer validation', () => {
   context.order = {stok:{adi:'SER. %0,5 METRONİDAZOL IV 100 ML TORBA(SETSİZ)'},doz:'3x1',turu:1};
   assert.equal(run('isMedicineDisplayOrderRaw(order)'), true);
@@ -240,6 +248,29 @@ async function integration() {
   }));
   await assert.rejects(originalApiJson('/read',{}, {timeoutMs:5}), /zaman aşımı/);
   count++; console.log('PASS Read queries retry transient errors, reject permission errors, and abort timed-out requests');
+  const labRequests = [];
+  context.apiJson = async (url, options) => {
+    labRequests.push({url,options});
+    const filter = JSON.parse(options.filter)[0];
+    if (url.endsWith('getLisRaporHastaInfoList')) {
+      const records=Array.from({length:121}, (_,i)=>({lisKabulId:i+1}));
+      return {data:records.slice(options.start, options.start+options.limit), total:121};
+    }
+    if (url.endsWith('getLisHastaTupInfo')) return {data:[{barkodNo:filter.value}]};
+    if (url.endsWith('getLisRaporDetay')) return {data:Array.isArray(filter.value) && filter.value.map(String).includes('121')
+      ? ['CA-125','CA-15-3','CA-19-9','CEA'].map((tetkikAdi,i)=>({tetkikAdi,sonuc:String(12+i),sonucTarihi:'01.10.2026'}))
+      : [{tetkikAdi:'AFP',sonuc:'2',sonucTarihi:'21.10.2026'}]};
+    throw Error('Unexpected lab request');
+  };
+  context.patient = {hastaId:99,hastaGelisId:13};
+  await run('fetchLabs(patient)');
+  assert.equal(context.patient.labs.CA199[0].value, '14');
+  assert.equal(context.patient.labs.CA125[0].date, '01.10.2026');
+  assert.ok(labRequests.some(x=>x.url.endsWith('getLisRaporHastaInfoList') && x.options.start===100));
+  count++; console.log('PASS Older CA results beyond 100 acceptances are fetched even when a recent AFP exists');
+  context.apiJson = async()=>({data:Array.from({length:100},(_,i)=>({lisKabulId:i+1})),total:200});
+  await assert.rejects(run('fetchLabAcceptances("hastaId",99)'), /tekrar döndürdü/);
+  count++; console.log('PASS Repeated lab history pages report incomplete scanning instead of looping');
   context.rows = chain;
   context.patient = {hastaId:99, hastaGelisId:13, birimSevkId:4, errors:[]};
   run(`apiJson = async (url, options) => {

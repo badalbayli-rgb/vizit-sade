@@ -1,7 +1,8 @@
 (() => {
-  const APP_VERSION = "1.17";
+  const APP_VERSION = "1.18";
   /********************************************************************
-   * VİZİT SADE V1.17 KLİNİK PANEL
+   * VİZİT SADE V1.18 KLİNİK PANEL
+   * - V1.18: İzotonik hacimleri ve sayfalı laboratuvar kabul geçmişi.
    * - V1.17: İnfüzyon/OKSAPAR kısa adları, metronidazol torbası ve CA ad eşleştirmesi.
    * - V1.16: Kons öneri metni, dört temel tümör markeri satırı ve sorgu bazlı
    *   zaman aşımı/tekrar deneme; eksik bölüm adları açıklanır.
@@ -4431,43 +4432,56 @@ ${consults || "-"}
     */
   }
 
+  async function fetchLabAcceptances(property, value) {
+    const rows = [];
+    const seen = new Set();
+    const limit = 100;
+    for (let start = 0; ; start += limit) {
+      const response = await apiJson("/Lis/LisRaporSonuc/getLisRaporHastaInfoList", {
+        filter: JSON.stringify([{ property, value:Number(value), type:"Long", operator:"=" }]),
+        page:Math.floor(start / limit) + 1, start, limit,
+        sort:JSON.stringify([{ property:"lisKabulTarihi", direction:"DESC" }])
+      });
+      const page = response.data || [];
+      let added = 0;
+      page.forEach((item) => {
+        const key = clean(item.lisKabulId || item.id) || clean(item.lisKabulTarihi);
+        if (key && !seen.has(key)) { seen.add(key); rows.push(item); added++; }
+      });
+      const total = Number(response.totalCount ?? response.total);
+      if (page.length && !added) throw new Error("Lab: FONET geçmiş kabul sayfasını tekrar döndürdü; tarama tamamlanamadı.");
+      if (!page.length || (Number.isFinite(total) && total >= 0 && start + page.length >= total)) break;
+      if (page.length < limit && !Number.isFinite(total)) break;
+    }
+    return rows;
+  }
+
   async function fetchLabs(p) {
     if (!p.hastaGelisId && !p.hastaId) return;
     const property = p.hastaGelisId ? "hastaGelisId" : "hastaId";
     const value = p.hastaGelisId || p.hastaId;
-    const kabul = await apiJson("/Lis/LisRaporSonuc/getLisRaporHastaInfoList", {
-      filter: JSON.stringify([{ property, value: Number(value), type: "Long", operator: "=" }]),
-      page: 1,
-      start: 0,
-      limit: 20,
-      sort: JSON.stringify([{ property: "lisKabulTarihi", direction: "DESC" }])
-    });
-    if (!p.hastaGelisId && kabul.data?.[0]?.hastaGelisId) p.hastaGelisId = kabul.data[0].hastaGelisId;
-    let latest = (kabul.data || []).slice(0, 20);
+    let latest = await fetchLabAcceptances(property, value);
+    if (!p.hastaGelisId && latest[0]?.hastaGelisId) p.hastaGelisId = latest[0].hastaGelisId;
     if (p.hastaId) {
       try {
-        const historyKabul = await apiJson("/Lis/LisRaporSonuc/getLisRaporHastaInfoList", {
-          filter: JSON.stringify([{ property:"hastaId", value:Number(p.hastaId), type:"Long", operator:"=" }]),
-          page:1, start:0, limit:60,
-          sort:JSON.stringify([{ property:"lisKabulTarihi", direction:"DESC" }])
-        });
-        latest = [...latest, ...(historyKabul.data || []).slice(0, 40)].filter((item, index, all) => {
+        const historyKabul = await fetchLabAcceptances("hastaId", p.hastaId);
+        latest = [...latest, ...historyKabul].filter((item, index, all) => {
           const identity = clean(item.lisKabulId || item.id) || clean(item.lisKabulTarihi);
           return all.findIndex((candidate) =>
             (clean(candidate.lisKabulId || candidate.id) || clean(candidate.lisKabulTarihi)) === identity
           ) === index;
         });
-      } catch (e) { /* Güncel yatışın laboratuvarları yine kullanılabilir. */ }
+      } catch (e) { throw new Error("Lab geçmişi alınamadı: " + (e?.message || String(e))); }
     }
     const barkods = [];
     for (let offset = 0; offset < latest.length; offset += 6) {
       const batch = latest.slice(offset, offset + 6);
       const tubeLists = await Promise.all(batch.map((k) => apiJson("/Lis/LisRaporSonuc/getLisHastaTupInfo", {
-        filter: JSON.stringify([{ filterType: "kriterPanel", property: "t.lisKabul.id", value: Number(k.lisKabulId), type: "Long", operator: "=" }]),
+        filter: JSON.stringify([{ filterType: "kriterPanel", property: "t.lisKabul.id", value: Number(k.lisKabulId || k.id), type: "Long", operator: "=" }]),
         page: 1,
         start: 0,
         limit: 100
-      }).catch(() => ({ data:[] }))));
+      })));
       tubeLists.forEach((tup) => barkods.push(...(tup.data || []).map((x) => x.barkodNo).filter(Boolean)));
     }
     const uniqueBarkods = [...new Set(barkods.map(clean).filter(Boolean))];
@@ -4485,13 +4499,13 @@ ${consults || "-"}
         limit: 1500,
         group: JSON.stringify([{ property: "tupAdi", direction: "ASC" }]),
         sort: JSON.stringify([{ property: "lt.siraNo", direction: "ASC" }])
-      }).catch(() => ({ data:[] }));
+      });
       detailRows.push(...flattenLabDetailRows(detail.data || []));
     }
     let summarized = summarizeLabs(detailRows);
     // Bazı FONET kurulumlarında geçmiş marker tüpleri barkod listesinde dönmüyor.
     // Marker bulunamadıysa laboratuvar detayını geliş/hasta ilişkisi üzerinden de tara.
-    if (!latestTumorMarkerText(summarized.labs)) {
+    if (!["CA199", "CA153", "CA125", "CEA"].every((key) => summarized.labs[key]?.length)) {
       const directFilters = [
         p.hastaGelisId ? { property:"t.lisHastaTup.lisKabul.hastaGelis.id", value:Number(p.hastaGelisId) } : null,
         p.hastaGelisId ? { property:"t.lisHastaTup.lisKabul.hastaGelisId", value:Number(p.hastaGelisId) } : null,
@@ -4509,7 +4523,7 @@ ${consults || "-"}
           detailRows.push(...directRows);
           summarized = summarizeLabs(detailRows);
         }
-        if (latestTumorMarkerText(summarized.labs)) break;
+        if (["CA199", "CA153", "CA125", "CEA"].every((key) => summarized.labs[key]?.length)) break;
       }
     }
     const mainLabDate = relevantLabDate(summarized.labs);
@@ -6374,6 +6388,10 @@ ${consults || "-"}
     const original = clean(value).toLocaleUpperCase("tr-TR");
     const normalized = searchNorm(original);
     if (/metronidazol/.test(normalized)) return "METRONİDAZOL";
+    if (/\bizotonik\b/.test(normalized) && !/dekstroz|glukoz|dengeli/.test(normalized)) {
+      const volume = normalized.match(/\b(1000|500|250|100)\s*ml\b/);
+      if (volume) return "İZOTONİK " + volume[1];
+    }
     if (/dengeli\s+elektrolit/.test(normalized)) {
       const volume = normalized.match(/\b(1000|500)\s*ml\b/);
       if (volume) return "DENGELİ " + volume[1];

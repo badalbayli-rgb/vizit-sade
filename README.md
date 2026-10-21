@@ -1,6 +1,8 @@
 # Vizit Sade
 
-Güncel sürüm: **V1.17**
+Güncel sürüm: **V1.18**
+
+V1.18: İzotonik NaCl ürünleri hacimleri korunarak `İZOTONİK 500` / `İZOTONİK 100` olarak gösterilir. Laboratuvar kabul geçmişindeki ilk 20/40 kayıt kesintisi kaldırılmıştır; bütün kabul sayfaları taranır. Yakın tarihli AFP/CEA bulunması, diğer CA sonuçları için ek sorguyu durdurmaz. Geçmiş/tüp/sonuç sorgusu başarısızsa eksik tarama sessizce boş sonuç sayılmaz; Lab hatası bildirilir.
 
 V1.17: Dengeli elektrolit ürünleri `DENGELİ 1000` / `DENGELİ 500`, metronidazol ürünleri `METRONİDAZOL`, Oksapar ise `OKSAPAR 4000` / `OKSAPAR 6000` olarak gösterilir. Metronidazol infüzyonunun adındaki TORBA sözcüğü nedeniyle vizit ilaç listesinden elenmesi düzeltildi; ilaç aktarım doğrulaması değişmedi. FONET’in `CA-125`, `CA-15-3`, `CA-19-9` adları da tümör markerleri olarak tanınır.
 

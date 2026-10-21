@@ -1,7 +1,8 @@
 (() => {
-  const APP_VERSION = "1.16";
+  const APP_VERSION = "1.17";
   /********************************************************************
-   * VİZİT SADE V1.16 KLİNİK PANEL
+   * VİZİT SADE V1.17 KLİNİK PANEL
+   * - V1.17: İnfüzyon/OKSAPAR kısa adları, metronidazol torbası ve CA ad eşleştirmesi.
    * - V1.16: Kons öneri metni, dört temel tümör markeri satırı ve sorgu bazlı
    *   zaman aşımı/tekrar deneme; eksik bölüm adları açıklanır.
    * - V1.15: Konsültasyon gösterimleri en güncel 10 kayıtla sınırlandırılır.
@@ -2121,10 +2122,10 @@
   function normalizeLabName(name) {
     const s = clean(name);
     const n = s.toLocaleLowerCase("tr-TR");
-    if (/ca\s*19\s*[-.]?\s*9|karbonhidrat\s*antijen.*19/i.test(n)) return "CA199";
-    if (/ca\s*125|kanser\s*antijen.*125/i.test(n)) return "CA125";
-    if (/ca\s*15\s*[-.]?\s*3|kanser\s*antijen.*15/i.test(n)) return "CA153";
-    if (/ca\s*72\s*[-.]?\s*4|kanser\s*antijen.*72/i.test(n)) return "CA724";
+    if (/\bca[\s.\-–]*19[\s.\-–]*9\b|karbonhidrat\s*antijen.*19/i.test(n)) return "CA199";
+    if (/\bca[\s.\-–]*125\b|kanser\s*antijen.*125/i.test(n)) return "CA125";
+    if (/\bca[\s.\-–]*15[\s.\-–]*3\b|kanser\s*antijen.*15/i.test(n)) return "CA153";
+    if (/\bca[\s.\-–]*72[\s.\-–]*4\b|kanser\s*antijen.*72/i.test(n)) return "CA724";
     if (/serbest\s*psa|free\s*psa/i.test(n)) return "fPSA";
     if (/total\s*psa|total\s*prostat|prostat\s*spesifik\s*antijen|^psa$/i.test(n)) return "PSA";
     if (/karsinoembriyonik|carcinoembryonic|^cea$/i.test(n)) return "CEA";
@@ -3115,7 +3116,7 @@
       .filter((x) => x.answer || x.unit)
       .map((x) => `(${shortDate(x.date) || "-"}) ${x.unit || "Kons"}${x.answer ? ":\n" + aoeConsultAnswerExcerpt(x.answer) : ""}`)
       .join("\n");
-    const orders = (p.orders || []).slice(0, 12).map((x) => `${x.name} ${x.dose}`.trim()).join("+");
+    const orders = (p.orders || []).slice(0, 12).map((x) => `${aoeDrugName(x.name)} ${x.dose}`.trim()).join("+");
     const rad = formatRadiology(p.radiology, 6, 260);
     const nursing = (p.nursing || [])[0]?.text || "";
     const lastVital = latestVitalLine(p.vitals, p);
@@ -3158,7 +3159,7 @@ ${consults}
       .filter((x) => x.answer || x.unit)
       .map((x) => `(${shortDate(x.date) || "-"}) ${x.unit || "Kons"}${x.answer ? ":\n" + aoeConsultAnswerExcerpt(x.answer) : ""}`)
       .join("\n");
-    const orders = (p.orders || []).slice(0, 12).map((x) => `${x.name} ${x.dose}`.trim()).join("+");
+    const orders = (p.orders || []).slice(0, 12).map((x) => `${aoeDrugName(x.name)} ${x.dose}`.trim()).join("+");
     const rad = formatRadiology(p.radiology, 6, 260);
     const nursing = (p.nursing || [])[0]?.text || "";
     const lastVital = latestVitalLine(p.vitals, p);
@@ -3306,7 +3307,7 @@ ${consults}
       const answer = x.answer ? `\n${aoeConsultAnswerExcerpt(x.answer)}` : "";
       return `(${shortDate(x.date) || "-"}) ${x.unit || "Kons"}${answer}`;
     }).join("\n---\n");
-    const orders = (p.orders || []).map((x) => `- ${x.name} ${x.dose} ${x.amount || ""}`.trim()).join("\n");
+    const orders = (p.orders || []).map((x) => `- ${aoeDrugName(x.name)} ${x.dose} ${x.amount || ""}`.trim()).join("\n");
     const nursing = (p.nursing || []).slice(0, 3).map((x) => `(${shortDate(x.date) || "-"}) ${x.text}`).join("\n---\n");
     const rad = formatRadiology(p.radiology, 10, 900);
     const vitals = formatVitals(p.vitals, 8);
@@ -3396,7 +3397,7 @@ ${consults || "-"}
           ${detailBlock("Anestezi Formu", `ASA:${meta.asa || "-"}${meta.destination ? " Yer:" + meta.destination : ""}\nBH:${meta.bh || "-"}\nKİ:${meta.ki || "-"}\nGO:${meta.go || "-"}${p.anesthesia?.capturedAt ? "\nYakalama:" + p.anesthesia.capturedAt : ""}`)}
           ${detailBlock("Diyet", `Kart:${dietInfo.code}${dietInfo.extra ? "\nEk:" + dietInfo.extra : ""}\nHam:${p.diyet || "-"}`)}
           ${detailBlock("Lab", labLine(p.labs) || "-")}
-          ${detailBlock("Order", (p.orders || []).map((x) => `${x.name} ${x.dose}`).join("\n") || "-")}
+          ${detailBlock("Order", (p.orders || []).map((x) => `${aoeDrugName(x.name)} ${x.dose}`).join("\n") || "-")}
           ${detailBlock("Konsültasyon", latestConsults(p.consults).map((x) => `${x.unit || "Kons"}\n${x.answer ? aoeConsultAnswerExcerpt(x.answer) : x.request || "-"}`).join("\n---\n") || "-")}
           ${detailBlock("Vitaller", formatVitals(p.vitals, 10) || "-")}
           ${detailBlock("Hemşire / Devir", (p.nursing || []).map((x) => `${x.date || ""}\n${x.text || ""}`).join("\n---\n") || "-")}
@@ -3981,7 +3982,7 @@ ${consults || "-"}
     }
     p.orderHistoryRows = historyRows;
     const firstDateByOrder = new Map();
-    historyRows.filter(isMedicineOrderRaw).forEach((row) => {
+    historyRows.filter(isMedicineDisplayOrderRaw).forEach((row) => {
       const date = row.baslangicTarihi || row.istemTarihi || row.kayitTarihi || row.eklemeTarihi || row.tarih || "";
       const stamp = parseTrDate(date);
       orderHistoryKeys(row).forEach((key) => {
@@ -3991,7 +3992,7 @@ ${consults || "-"}
     });
     // Vizit çıktısında aktif ilaçların tamamı yer almalı; kart özeti kendi
     // görünüm sınırını ayrıca uygular. Burada kesmek Word'de ilaç kaybettirir.
-    p.orders = p.orderRows.filter(isMedicineOrderRaw).map((x) => ({
+    p.orders = p.orderRows.filter(isMedicineDisplayOrderRaw).map((x) => ({
       id: x.id,
       name: orderRawName(x),
       dose: x.doz || "",
@@ -4120,6 +4121,17 @@ ${consults || "-"}
     const stockType = orderRawStockType(x);
     if (/sarf|malzeme|hizmet/.test(stockType)) return false;
     return Boolean(name);
+  }
+
+  function isMedicineDisplayOrderRaw(x = {}) {
+    if (isMedicineOrderRaw(x)) return true;
+    const name = orderRawName(x);
+    if (!name || orderRawTypeId(x) === 2) return false;
+    if (/sarf|malzeme|hizmet/.test(orderRawStockType(x))) return false;
+    // Metronidazole infusion bags are medicines even though their name contains TORBA.
+    // A missing/nonstandard dose must not hide this named medicine in the visit view.
+    // Transfer validation continues to use isMedicineOrderRaw.
+    return /metronidazol/.test(searchNorm(name));
   }
 
   function excludedOrderText(x = {}) {
@@ -5073,7 +5085,7 @@ ${consults || "-"}
     const operation = operationBadge(p);
     const dietBadge = dietInfo.code && dietInfo.code !== "-" ? dietInfo.code : "";
     const riskBadge = clean(freeText.match(/sarı risk|kırmızı risk|yüksek risk|düşme riski/i)?.[0] || "").toLocaleUpperCase("tr-TR");
-    const orderText = (p.orders || []).slice(0, 5).map((x) => clean(`${x.name} ${x.dose}`)).filter(Boolean).join(" + ");
+    const orderText = (p.orders || []).slice(0, 5).map((x) => clean(`${aoeDrugName(x.name)} ${x.dose}`)).filter(Boolean).join(" + ");
     const consultText = latestConsult.answer
       ? `${latestConsult.unit || "Kons"} -> ${clip(aoeConsultAnswerExcerpt(latestConsult.answer), 90)}`
       : (latestConsult.unit ? `${latestConsult.unit}${latestConsult.request ? " -> " + clip(latestConsult.request, 80) : ""}` : "");
@@ -5272,7 +5284,7 @@ ${consults || "-"}
     const operation = operationBadge(p);
     const dietBadge = dietInfo.code && dietInfo.code !== "-" ? dietInfo.code : "";
     const riskBadge = clean(freeText.match(/sarı risk|kırmızı risk|yüksek risk|düşme riski/i)?.[0] || "").toLocaleUpperCase("tr-TR");
-    const orderText = (p.orders || []).slice(0, 4).map((x) => clean(`${x.name} ${x.dose}`)).filter(Boolean).join(" + ");
+    const orderText = (p.orders || []).slice(0, 4).map((x) => clean(`${aoeDrugName(x.name)} ${x.dose}`)).filter(Boolean).join(" + ");
     const consultText = latestConsult.answer
       ? `${latestConsult.unit || "Kons"} -> ${clip(aoeConsultAnswerExcerpt(latestConsult.answer), 78)}`
       : (latestConsult.unit ? `${latestConsult.unit}${latestConsult.request ? " -> " + clip(latestConsult.request, 72) : ""}` : "");
@@ -5476,7 +5488,7 @@ ${consults || "-"}
           ${p.glucoseChecks?.length ? detailBlockV16("Glukotest", glucoseCheckText(p, 12), t, "G") : ""}
           ${detailBlockV16("Görüntüleme", formatRadiology(p.radiology, 12, 1200) || "-", t, "G")}
           ${detailBlockV16("Konsültasyon", latestConsults(p.consults).map((x) => `${x.unit || "Kons"}${x.date ? " | " + x.date : ""}\n${x.answer ? aoeConsultAnswerExcerpt(x.answer) : x.request || "-"}`).join("\n---\n") || "-", t, "K")}
-          ${detailBlockV16("Order", (p.orders || []).map((x) => `${x.name} ${x.dose}`).join("\n") || "-", t, "Rx")}
+          ${detailBlockV16("Order", (p.orders || []).map((x) => `${aoeDrugName(x.name)} ${x.dose}`).join("\n") || "-", t, "Rx")}
           ${detailBlockV16("Hemşire / Devir", (p.nursing || []).map((x) => `${x.date || ""}\n${x.text || ""}`).join("\n---\n") || "-", t, "N")}
           ${p.errors?.length ? detailBlockV16("Hatalar", p.errors.join("\n"), t, "!") : ""}
           <details style="border:1px solid ${t.border};border-radius:10px;background:${t.surface};padding:9px;color:${t.text};">
@@ -6360,6 +6372,17 @@ ${consults || "-"}
 
   function aoeDrugName(value) {
     const original = clean(value).toLocaleUpperCase("tr-TR");
+    const normalized = searchNorm(original);
+    if (/metronidazol/.test(normalized)) return "METRONİDAZOL";
+    if (/dengeli\s+elektrolit/.test(normalized)) {
+      const volume = normalized.match(/\b(1000|500)\s*ml\b/);
+      if (volume) return "DENGELİ " + volume[1];
+    }
+    if (/^oksapar\b/.test(normalized)) {
+      const units = normalized.match(/\b(\d[\d.,]*)\s*anti[\s-]*xa/);
+      const strength = units ? units[1].replace(/[.,]/g, "") : normalized.match(/\b(4000|6000)\b/)?.[1];
+      if (strength) return "OKSAPAR " + strength;
+    }
     const ingredientNames = [
       "METRONİDAZOL", "METRONIDAZOL", "SEFTRİAKSON", "SEFTRIAKSON",
       "PİPERASİLİN", "PIPERASILIN", "TAZOBAKTAM", "MEROPENEM",

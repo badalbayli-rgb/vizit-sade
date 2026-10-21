@@ -17,6 +17,40 @@ const run = code => vm.runInContext(code, context);
 const originalApiJson = run('apiJson');
 let count = 0;
 function test(name, fn) { fn(); count++; console.log('PASS ' + name); }
+test('Infusion names retain volume and Oksapar units while metronidazole brands collapse', () => {
+  for (const [name, expected] of [
+    ['TURKFLEKS DENGELİ ELEKTROLİT 1000 ML SOLÜSYONU PVC (SETSİZ)', 'DENGELİ 1000'],
+    ['TURKOFLEKS DENGELİ ELEKTROLİT 500ML', 'DENGELİ 500'],
+    ['DENGELİ ELEKTROLİT 500 ML (İZOLEN) SETSİZ', 'DENGELİ 500'],
+    ['SER. %0,5 METRONİDAZOL IV 100 ML TORBA(SETSİZ)', 'METRONİDAZOL'],
+    ['SER. %5 METRONIDAZOL', 'METRONİDAZOL'],
+    ['TURKFLEKS %0,5 METRONİDAZOL I.V. ENJEKSIYONLUK COZELTI', 'METRONİDAZOL'],
+    ['OKSAPAR 4000 Anti-Xa IU/0,4 ML ENJEKTÖR', 'OKSAPAR 4000'],
+    ['OKSAPAR 6000 Anti-Xa IU/0,6 ML ENJEKTÖR', 'OKSAPAR 6000'],
+    ['PROGAS 40 MG IV FLAKON', 'PROGAS']]) {
+    context.drug = name; assert.equal(run('aoeDrugName(drug)'), expected);
+  }
+});
+test('Metronidazole infusion bags stay in visit orders without relaxing transfer validation', () => {
+  context.order = {stok:{adi:'SER. %0,5 METRONİDAZOL IV 100 ML TORBA(SETSİZ)'},doz:'3x1',turu:1};
+  assert.equal(run('isMedicineDisplayOrderRaw(order)'), true);
+  assert.equal(run('isMedicineOrderRaw(order)'), false);
+  for (const row of [{...context.order,turu:2}, {...context.order,stokTuru:'Sarf'},
+    {stok:{adi:'KOLOSTOMİ TORBA'},doz:'3x1',turu:1}]) {
+    context.excluded = row; assert.equal(run('isMedicineDisplayOrderRaw(excluded)'), false);
+  }
+});
+test('FONET hyphenated CA names survive grouped reports into the tumor footer', () => {
+  context.report = {data:[{children:[
+    {tetkikAdi:'CA-125',sonuc:'33.1',sonucTarihi:'20.10.2026'},
+    {tetkikAdi:'CA-15-3',sonuc:'12.3',sonucTarihi:'20.10.2026'},
+    {tetkikAdi:'CA-19-9',sonuc:'4.5',sonucTarihi:'20.10.2026'}]}]};
+  const footer = run('latestTumorMarkerText(summarizeLabs(flattenLabDetailRows(report)).labs, true)');
+  assert.ok(footer.includes('CA19-9:4.5')); assert.ok(footer.includes('CA15-3:12.3'));
+  assert.ok(footer.includes('CA125:33.1'));
+  assert.equal(run('normalizeLabName("CA 19-9")'), 'CA199');
+  assert.equal(run('normalizeLabName("Kalsiyum (Ca)")'), 'Ca');
+});
 test('Consultation excerpts use recommendation headings, spelling variants, and double-star markers', () => {
   for (const [text, expected] of [
     ['Öykü ve muayene. Öneriler: Takip önerilir.', 'Takip önerilir.'],

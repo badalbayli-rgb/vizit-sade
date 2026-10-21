@@ -1,6 +1,8 @@
 # Vizit Sade
 
-Güncel sürüm: **V1.16**
+Güncel sürüm: **V1.17**
+
+V1.17: Dengeli elektrolit ürünleri `DENGELİ 1000` / `DENGELİ 500`, metronidazol ürünleri `METRONİDAZOL`, Oksapar ise `OKSAPAR 4000` / `OKSAPAR 6000` olarak gösterilir. Metronidazol infüzyonunun adındaki TORBA sözcüğü nedeniyle vizit ilaç listesinden elenmesi düzeltildi; ilaç aktarım doğrulaması değişmedi. FONET’in `CA-125`, `CA-15-3`, `CA-19-9` adları da tümör markerleri olarak tanınır.
 
 V1.16: Konsültasyonlarda `Öneriler:`, `Önerilr:` veya benzeri öneri başlığı varsa sonrası; başlık yoksa ilk `**` işaretinden sonrası gösterilir. İşaret yoksa tam not korunur, ham konsültasyon verisi değiştirilmez. En fazla 10 konsültasyon gösterme kuralı devam eder. Kan tablosunun altında ve hasta kartlarında CA19-9, CA15-3, CA125 ve CEA daima listelenir; mevcut sonucun tarihi belirtilir, sonuç yoksa `—` yazılır.
 

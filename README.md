@@ -1,6 +1,8 @@
 # Vizit Sade
 
-Güncel sürüm: **V1.18**
+Güncel sürüm: **V1.19**
+
+V1.19: Laboratuvar taraması son 45 günle sınırlıdır. Kabul listesi en yeniden eskiye taranır; 45 gün sınırına ulaşılınca sonraki sayfalar ve eski tüpler sorgulanmaz. Marker bulunmazsa sınırsız geçmiş sorgusu yapılmaz. Son 45 günde sonucu olmayan tümör markerleri `—` olarak gösterilir; önceki taramadan kalmış eski sonuçlar temizlenir.
 
 V1.18: İzotonik NaCl ürünleri hacimleri korunarak `İZOTONİK 500` / `İZOTONİK 100` olarak gösterilir. Laboratuvar kabul geçmişindeki ilk 20/40 kayıt kesintisi kaldırılmıştır; bütün kabul sayfaları taranır. Yakın tarihli AFP/CEA bulunması, diğer CA sonuçları için ek sorguyu durdurmaz. Geçmiş/tüp/sonuç sorgusu başarısızsa eksik tarama sessizce boş sonuç sayılmaz; Lab hatası bildirilir.
 

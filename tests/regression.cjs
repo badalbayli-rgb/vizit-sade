@@ -77,6 +77,13 @@ test('Tumor marker footer always lists four requested markers, dates, and zero v
     for (const label of ['CA19-9', 'CA15-3', 'CA125', 'CEA']) assert.ok(output.includes(label));
   }
 });
+test('Tumor footer excludes results older than 45 days and future dates', () => {
+  context.labs={CA199:[{value:99,date:'01.08.2026'}],CA125:[{value:12,date:'07.09.2026'}],
+    CEA:[{value:4,date:'22.10.2026'}]};
+  assert.equal(run('latestTumorMarkerText(labs,true)'), 'CA19-9:— CA15-3:— CA125:12 (07.09) CEA:—');
+  assert.equal(run('withinLabLookback("06.09.2026 12:00", Date.now())'), true);
+  assert.equal(run('withinLabLookback("06.09.2026 11:59", Date.now())'), false);
+});
 test('Readiness shows exact failed sections and excludes paused patients from scan progress', () => {
   run(`state.patients=[{key:'active',birimSevkId:1,oda:'TEST',lastFailedLabels:['Lab'],sectionErrors:{Lab:'Lab: HTTP 503'}},
     {key:'paused',birimSevkId:2}]; state.pausedKeys=['paused']; state.metrics={processed:1}; state.bootstrapComplete=true; state.busy=false;`);
@@ -253,7 +260,7 @@ async function integration() {
     labRequests.push({url,options});
     const filter = JSON.parse(options.filter)[0];
     if (url.endsWith('getLisRaporHastaInfoList')) {
-      const records=Array.from({length:121}, (_,i)=>({lisKabulId:i+1}));
+      const records=Array.from({length:121}, (_,i)=>({lisKabulId:i+1,lisKabulTarihi:i===120 ? '01.10.2026' : '21.10.2026'}));
       return {data:records.slice(options.start, options.start+options.limit), total:121};
     }
     if (url.endsWith('getLisHastaTupInfo')) return {data:[{barkodNo:filter.value}]};
@@ -268,9 +275,33 @@ async function integration() {
   assert.equal(context.patient.labs.CA125[0].date, '01.10.2026');
   assert.ok(labRequests.some(x=>x.url.endsWith('getLisRaporHastaInfoList') && x.options.start===100));
   count++; console.log('PASS Older CA results beyond 100 acceptances are fetched even when a recent AFP exists');
-  context.apiJson = async()=>({data:Array.from({length:100},(_,i)=>({lisKabulId:i+1})),total:200});
+  context.apiJson = async()=>({data:Array.from({length:100},(_,i)=>({lisKabulId:i+1,lisKabulTarihi:'21.10.2026'})),total:200});
   await assert.rejects(run('fetchLabAcceptances("hastaId",99)'), /tekrar döndürdü/);
   count++; console.log('PASS Repeated lab history pages report incomplete scanning instead of looping');
+  const boundedRequests=[];
+  context.apiJson=async(url,options)=>{
+    boundedRequests.push({url,options});
+    if(url.endsWith('getLisRaporHastaInfoList')) return {data:[
+      {lisKabulId:1,lisKabulTarihi:'20.10.2026'},
+      {lisKabulId:2,lisKabulTarihi:'01.08.2026'}],total:300};
+    if(url.endsWith('getLisHastaTupInfo')) {
+      assert.equal(JSON.parse(options.filter)[0].value,1);
+      return {data:[{barkodNo:1}]};
+    }
+    if(url.endsWith('getLisRaporDetay')) {
+      assert.equal(JSON.parse(options.filter)[0].operator,'IN');
+      return {data:[{tetkikAdi:'CA-125',sonuc:'15',sonucTarihi:'01.08.2026'},
+        {tetkikAdi:'WBC',sonuc:'7',sonucTarihi:'20.10.2026',oncekiSonucList:[{sonuc:'8',sonucTarihi:'01.08.2026'}]}]};
+    }
+    throw Error('Unexpected unbounded request');
+  };
+  context.patient={hastaId:99,hastaGelisId:13,labs:{CA199:[{value:'100',date:'01.08.2026'}]}};
+  await run('fetchLabs(patient)');
+  assert.equal(context.patient.labs.CA125.length,0);
+  assert.equal(context.patient.labs.CA199,undefined);
+  assert.equal(context.patient.labs.WBC.length,1);
+  assert.ok(!boundedRequests.some(x=>x.options.start>0));
+  count++;console.log('PASS Lab scan stops at 45 days, skips older tubes, removes stale cached markers and never retries unbounded history');
   context.rows = chain;
   context.patient = {hastaId:99, hastaGelisId:13, birimSevkId:4, errors:[]};
   run(`apiJson = async (url, options) => {

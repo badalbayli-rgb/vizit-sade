@@ -1,7 +1,8 @@
 (() => {
-  const APP_VERSION = "1.18";
+  const APP_VERSION = "1.19";
   /********************************************************************
-   * VİZİT SADE V1.18 KLİNİK PANEL
+   * VİZİT SADE V1.19 KLİNİK PANEL
+   * - V1.19: Laboratuvar ve tümör markerleri için son 45 gün sınırı.
    * - V1.18: İzotonik hacimleri ve sayfalı laboratuvar kabul geçmişi.
    * - V1.17: İnfüzyon/OKSAPAR kısa adları, metronidazol torbası ve CA ad eşleştirmesi.
    * - V1.16: Kons öneri metni, dört temel tümör markeri satırı ve sorgu bazlı
@@ -2450,7 +2451,7 @@
     const required = ["CA199", "CA153", "CA125", "CEA"];
     const keys = [...required, ...TUMOR_MARKER_KEYS.filter((key) => !required.includes(key))];
     return keys.map((key) => {
-      const item = (labs?.[key] || []).filter((x) => x.value != null && String(x.value).trim() !== "")
+      const item = (labs?.[key] || []).filter((x) => x.value != null && String(x.value).trim() !== "" && withinLabLookback(x.date))
         .slice().sort((a, b) => (parseTrDate(b.date) || 0) - (parseTrDate(a.date) || 0))[0];
       const label = TUMOR_MARKER_LABELS[key] || key;
       return item ? `${label}:${item.value}${shortDate(item.date) ? " (" + shortDate(item.date) + ")" : ""}`
@@ -4432,6 +4433,11 @@ ${consults || "-"}
     */
   }
 
+  function withinLabLookback(value, nowMs = Date.now()) {
+    const stamp = parseTrDate(value);
+    return Boolean(stamp && stamp >= nowMs - 45 * 86400000 && stamp <= nowMs);
+  }
+
   async function fetchLabAcceptances(property, value) {
     const rows = [];
     const seen = new Set();
@@ -4446,10 +4452,15 @@ ${consults || "-"}
       let added = 0;
       page.forEach((item) => {
         const key = clean(item.lisKabulId || item.id) || clean(item.lisKabulTarihi);
-        if (key && !seen.has(key)) { seen.add(key); rows.push(item); added++; }
+        if (key && !seen.has(key)) {
+          seen.add(key); added++;
+          if (withinLabLookback(item.lisKabulTarihi)) rows.push(item);
+        }
       });
       const total = Number(response.totalCount ?? response.total);
       if (page.length && !added) throw new Error("Lab: FONET geçmiş kabul sayfasını tekrar döndürdü; tarama tamamlanamadı.");
+      const oldest = parseTrDate(page[page.length - 1]?.lisKabulTarihi);
+      if (oldest && oldest < Date.now() - 45 * 86400000) break;
       if (!page.length || (Number.isFinite(total) && total >= 0 && start + page.length >= total)) break;
       if (page.length < limit && !Number.isFinite(total)) break;
     }
@@ -4485,7 +4496,6 @@ ${consults || "-"}
       tubeLists.forEach((tup) => barkods.push(...(tup.data || []).map((x) => x.barkodNo).filter(Boolean)));
     }
     const uniqueBarkods = [...new Set(barkods.map(clean).filter(Boolean))];
-    if (!uniqueBarkods.length) return;
     // Çok sayıda geçmiş barkodu tek sorguda istemek FONET'in sonuç limitine takılıyor
     // ve özellikle seyrek çalışılan tümör markerlerinin kaybolmasına yol açıyordu.
     // Küçük barkod gruplarını ayrı ayrı alarak bütün geçmiş sonuçları koru.
@@ -4502,49 +4512,16 @@ ${consults || "-"}
       });
       detailRows.push(...flattenLabDetailRows(detail.data || []));
     }
-    let summarized = summarizeLabs(detailRows);
-    // Bazı FONET kurulumlarında geçmiş marker tüpleri barkod listesinde dönmüyor.
-    // Marker bulunamadıysa laboratuvar detayını geliş/hasta ilişkisi üzerinden de tara.
-    if (!["CA199", "CA153", "CA125", "CEA"].every((key) => summarized.labs[key]?.length)) {
-      const directFilters = [
-        p.hastaGelisId ? { property:"t.lisHastaTup.lisKabul.hastaGelis.id", value:Number(p.hastaGelisId) } : null,
-        p.hastaGelisId ? { property:"t.lisHastaTup.lisKabul.hastaGelisId", value:Number(p.hastaGelisId) } : null,
-        p.hastaId ? { property:"t.lisHastaTup.lisKabul.hasta.id", value:Number(p.hastaId) } : null
-      ].filter(Boolean);
-      for (const directFilter of directFilters) {
-        const direct = await apiJson("/Lis/LisRaporSonuc/getLisRaporDetay", {
-          filter: JSON.stringify([{ filterType:"kriterPanel", ...directFilter, type:"Long", operator:"=" }]),
-          page:1, start:0, limit:2500,
-          group:JSON.stringify([{ property:"tupAdi", direction:"ASC" }]),
-          sort:JSON.stringify([{ property:"lt.siraNo", direction:"ASC" }])
-        }).catch(() => ({ data:[] }));
-        const directRows = flattenLabDetailRows(direct.data || []);
-        if (directRows.length) {
-          detailRows.push(...directRows);
-          summarized = summarizeLabs(detailRows);
-        }
-        if (["CA199", "CA153", "CA125", "CEA"].every((key) => summarized.labs[key]?.length)) break;
-      }
-    }
+    const summarized = summarizeLabs(detailRows);
+    Object.keys(summarized.labs).forEach((key) => {
+      summarized.labs[key] = summarized.labs[key].filter((item) => withinLabLookback(item.date));
+    });
     const mainLabDate = relevantLabDate(summarized.labs);
     const labDateText = compactLabDateHeader(labVisitDates(summarized.labs, 8));
-    if (mainLabDate) {
-      p.labs = summarized.labs;
-      p.labDate = labDateText || mainLabDate;
-    } else if (!p.labs) {
-      p.labs = summarized.labs;
-      p.labDate = "";
-    }
-    p.labs = p.labs || {};
-    TUMOR_MARKER_KEYS.forEach((key) => {
-      if (summarized.labs?.[key]?.length) p.labs[key] = summarized.labs[key];
-    });
-    if (summarized.glucoseChecks.length) {
-      p.glucoseChecks = summarized.glucoseChecks;
-    } else if (!Array.isArray(p.glucoseChecks)) {
-      p.glucoseChecks = [];
-    }
-    p.cultures = summarized.cultures || [];
+    p.labs = summarized.labs;
+    p.labDate = labDateText || mainLabDate || "";
+    p.glucoseChecks = summarized.glucoseChecks.filter((item) => withinLabLookback(item.date));
+    p.cultures = (summarized.cultures || []).filter((item) => withinLabLookback(item.date));
   }
 
   async function runPool(items, concurrency, worker) {
